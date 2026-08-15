@@ -14,6 +14,8 @@
 
 ## 换一台 Windows 电脑继续开发
 
+完整换机与接手步骤见 [`WORK_MACHINE_SETUP.md`](WORK_MACHINE_SETUP.md)。
+
 工作机只需要预先安装：
 
 - Git
