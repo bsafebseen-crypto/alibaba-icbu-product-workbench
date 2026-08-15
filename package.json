@@ -1,0 +1,20 @@
+{
+  "name": "alibaba-icbu-product-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.10.1"
+  }
+}

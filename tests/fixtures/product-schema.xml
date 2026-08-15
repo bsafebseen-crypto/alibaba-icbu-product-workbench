@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<itemSchema>
+  <field id="subject" name="Product Name" type="input">
+    <input value="Original Safety Vest" />
+  </field>
+  <field id="product_summary" name="Product Summary" type="textarea">
+    <textarea value="Original summary" />
+  </field>
+  <field id="product_faq" name="FAQ" type="complex">
+    <complex-values>
+      <complex-value>
+        <input id="question_1" value="Original question 1?" />
+        <input id="answer_1" value="Original answer 1." />
+      </complex-value>
+      <complex-value>
+        <input id="question_2" value="Original question 2?" />
+        <input id="answer_2" value="Original answer 2." />
+      </complex-value>
+      <complex-value>
+        <input id="question_3" value="Original question 3?" />
+        <input id="answer_3" value="Original answer 3." />
+      </complex-value>
+      <complex-value>
+        <input id="question_4" value="Original question 4?" />
+        <input id="answer_4" value="Original answer 4." />
+      </complex-value>
+      <complex-value>
+        <input id="question_5" value="Original question 5?" />
+        <input id="answer_5" value="Original answer 5." />
+      </complex-value>
+      <complex-value>
+        <input id="question_6" value="Keep question 6?" />
+        <input id="answer_6" value="Keep answer 6." />
+      </complex-value>
+    </complex-values>
+  </field>
+  <field id="custom_attributes" name="Custom Attributes" type="complex">
+    <complex-values>
+      <complex-value>
+        <input id="attribute_name_1" value="Material" />
+        <input id="attribute_value_1" value="Polyester" />
+      </complex-value>
+      <complex-value>
+        <input id="attribute_name_2" value="Closure Style" />
+        <input id="attribute_value_2" value="Front Zipper" />
+      </complex-value>
+    </complex-values>
+  </field>
+  <field id="price" name="Price" type="input">
+    <input value="12.50" />
+  </field>
+  <field id="sku" name="SKU" type="input">
+    <input value="SKU-001" />
+  </field>
+  <field id="main_image" name="Main Image" type="images">
+    <image value="https://example.invalid/main.jpg" />
+  </field>
+  <field id="future_field" name="Unknown Future Field" type="input">
+    <input value="keep-me" />
+  </field>
+</itemSchema>

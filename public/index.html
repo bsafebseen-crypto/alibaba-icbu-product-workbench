@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="从本地图片和关键词表创建阿里国际站商品">
+    <title>国际站自动上品</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <aside class="rail" aria-label="工作台导航">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">I</span>
+        <div class="brand-copy">
+          <strong>国际站自动上品</strong>
+          <span>本地工作台</span>
+        </div>
+      </div>
+
+      <nav class="module-nav">
+        <button class="module-link active" type="button" data-module="dashboard" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 13h6v7H4zM14 4h6v16h-6zM4 4h6v5H4z"/></svg>
+          </span>
+          <span class="nav-label"><strong>运营概览</strong><small>任务与完成情况</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="product-pool">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 6V4h8v2M4 10h16M8 14h3"/></svg>
+          </span>
+          <span class="nav-label"><strong>产品池</strong><small>草稿、预览与待办</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="auto-listing">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
+          </span>
+          <span class="nav-label"><strong>自动上品</strong><small>商品素材与内容</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="keywords">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 7h10M4 12h16M4 17h12M18 5v4M16 7h4"/></svg>
+          </span>
+          <span class="nav-label"><strong>关键词表</strong><small>导入与检查词库</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="ai-settings">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4"/></svg>
+          </span>
+          <span class="nav-label"><strong>AI 接口</strong><small>模型与密钥</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="alibaba-settings">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16v11H4zM8 7V4h8v3M8 12h8M8 15h5"/></svg>
+          </span>
+          <span class="nav-label"><strong>阿里接口</strong><small>授权与商品 API</small></span>
+        </button>
+      </nav>
+
+      <div class="rail-footer">
+        <div class="service-state" id="service-state">
+          <span class="state-dot" aria-hidden="true"></span>
+          <span class="nav-label">正在连接本地服务</span>
+        </div>
+      </div>
+    </aside>
+
+    <header class="operations-topbar" id="operations-topbar">
+      <div class="topbar-context">
+        <strong>国际站运营工作台</strong>
+        <span>本地草稿模式</span>
+      </div>
+      <div class="topbar-states" aria-label="工作台状态">
+        <span class="top-state"><i class="state-dot" aria-hidden="true"></i><b>本地服务</b><em id="top-local-state">连接中</em></span>
+        <span class="top-state"><b>阿里接口</b><em id="top-alibaba-state">待验证</em></span>
+        <span class="top-state"><b>当前批次</b><em id="top-batch-state">暂无</em></span>
+        <span class="top-state"><b>最近保存</b><em id="top-last-saved">暂无</em></span>
+      </div>
+    </header>
+
+    <main class="app" id="main-content">
+      <section class="module-page active" id="module-dashboard" aria-labelledby="dashboard-title">
+        <header class="page-header compact-page-header">
+          <div>
+            <h1 id="dashboard-title">运营概览</h1>
+            <p>查看本地任务、商品内容与图片预览的完成情况。</p>
+          </div>
+        </header>
+        <section class="dashboard-metrics" aria-label="本地任务统计">
+          <article><span>已保存批次</span><strong id="metric-batches">0</strong><small>本机任务</small></article>
+          <article><span>商品总数</span><strong id="metric-products">0</strong><small>按版本统计</small></article>
+          <article class="metric-ready"><span>预览完成</span><strong id="metric-ready">0</strong><small>可进入人工确认</small></article>
+          <article class="metric-attention"><span>需要处理</span><strong id="metric-attention">0</strong><small>内容、图片或预览</small></article>
+        </section>
+        <section class="console-panel recent-panel">
+          <div class="panel-band blue"><strong>最近批次</strong><span>所有数据只来自这台电脑</span></div>
+          <div class="recent-batches" id="recent-batches"><div class="placeholder-copy"><strong>还没有保存任务</strong><p>从自动上品页保存第一批商品后会显示在这里。</p></div></div>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-product-pool" aria-labelledby="product-pool-title" hidden>
+        <header class="page-header compact-page-header">
+          <div>
+            <h1 id="product-pool-title">产品池</h1>
+            <p>集中查看已保存商品、缺失项、图片银行状态和本地预览。</p>
+          </div>
+          <div class="pool-header-actions">
+            <button class="button quiet" id="pool-refresh" type="button">刷新数据</button>
+            <button class="button primary blue-button" id="pool-export" type="button">导出 CSV</button>
+          </div>
+        </header>
+        <section class="console-panel product-pool-panel">
+          <div class="panel-band teal"><strong>全部商品</strong><span id="pool-count">0 个商品</span></div>
+          <div class="pool-toolbar">
+            <label class="pool-search-field"><span class="visually-hidden">搜索产品池</span><input id="pool-search" type="search" autocomplete="off" placeholder="搜索标题、任务编号或主产品 ID"></label>
+            <label><span>阶段</span><select id="pool-stage"><option value="all">全部阶段</option><option value="needs-content">待补内容</option><option value="needs-images">待传图片</option><option value="needs-preview">待生成预览</option><option value="preview-ready">预览完成</option></select></label>
+            <label><span>排序</span><select id="pool-sort"><option value="updatedAt:desc">最近更新</option><option value="updatedAt:asc">最早更新</option><option value="title:asc">标题 A–Z</option></select></label>
+          </div>
+          <div class="pool-table-wrap">
+            <table class="pool-table">
+              <thead><tr><th>任务编号</th><th>商品标题</th><th>主产品 ID</th><th>类似品</th><th>内容</th><th>图片</th><th>Schema</th><th>当前阶段</th><th>更新时间</th><th>操作</th></tr></thead>
+              <tbody id="pool-table-body"></tbody>
+            </table>
+            <div class="pool-empty" id="pool-empty"><strong>还没有已保存商品</strong><p>在“自动上品”中保存任务后，商品会出现在这里。</p><button class="button quiet" type="button" data-go-module="auto-listing">去创建商品</button></div>
+          </div>
+          <footer class="pool-pagination"><span id="pool-page">第 1 / 1 页</span><div><button class="button quiet" id="pool-prev" type="button">上一页</button><button class="button quiet" id="pool-next" type="button">下一页</button></div></footer>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-auto-listing" aria-labelledby="auto-title" hidden>
+        <header class="page-header">
+          <div>
+            <p class="kicker">PRODUCT CREATION</p>
+            <h1 id="auto-title">自动上品</h1>
+            <p>先完成一个基础商品，再生成四个标题和卖点不同的类似品。</p>
+          </div>
+          <div class="header-status">
+            <span>草稿模式</span>
+            <strong>不会直接发布</strong>
+          </div>
+        </header>
+
+        <div class="flow-strip six-stages" aria-label="当前流程">
+          <span id="stage-materials"><b>1</b><i>素材</i><em>待准备</em></span>
+          <span id="stage-keywords"><b>2</b><i>关键词</i><em>待导入</em></span>
+          <span id="stage-ai"><b>3</b><i>AI 内容</i><em>待生成</em></span>
+          <span id="stage-photobank"><b>4</b><i>图片银行</i><em>待上传</em></span>
+          <span id="stage-preview"><b>5</b><i>Schema 预览</i><em>待生成</em></span>
+          <span id="stage-save"><b>6</b><i>保存任务</i><em>未保存</em></span>
+        </div>
+
+        <section class="current-batch-panel" id="current-batch-panel" aria-label="当前批次">
+          <div class="current-batch-head"><div><strong>当前批次</strong><span id="current-batch-caption">尚未创建商品</span></div><button class="button quiet compact-button" type="button" data-go-module="product-pool">查看产品池</button></div>
+          <div class="current-batch-list" id="current-batch-list"><p>读取一个主产品或创建空白版本后，这里会显示 4 个类似品的完成情况。</p></div>
+        </section>
+
+        <section class="work-surface">
+          <div class="surface-head">
+            <div>
+              <span class="section-index">01</span>
+              <h2>商品版本</h2>
+              <p>可以新建 1+4，也可以读取一个线上主产品并只做 4 个类似品。</p>
+            </div>
+            <nav class="product-tabs" id="product-tabs" aria-label="商品版本"></nav>
+          </div>
+
+          <div class="empty-state" id="empty-state">
+            <div class="creation-choice">
+              <span class="choice-index">A</span>
+              <div><h3>从本地新建 1 + 4</h3><p>上传图片和关键词表，先做一个主产品，再生成四个类似品。</p></div>
+              <button class="button quiet" id="manual-create" type="button">创建空白版本</button>
+            </div>
+            <div class="creation-choice featured">
+              <span class="choice-index">B</span>
+              <div><h3>沿用线上主产品</h3><p>读取现有商品的完整 Schema，四个新草稿只改标题、主题卖点和 FAQ。</p></div>
+              <div class="source-product-controls">
+                <label for="source-product-id">主产品 ID</label>
+                <div><input id="source-product-id" type="text" inputmode="numeric" autocomplete="off" placeholder="例如：1601915922577"><button class="button primary" id="load-source-product" type="button">读取并创建 4 个</button></div>
+                <small id="source-product-status" role="status">只读取，不会修改或发布原商品。</small>
+              </div>
+            </div>
+          </div>
+
+          <form class="product-form hidden" id="product-form">
+            <div class="template-banner hidden" id="template-banner">
+              <div><span>继承主产品</span><strong id="template-product-id">—</strong></div>
+              <p>价格、SKU、标准属性和详情保留原值；当前编辑主图分配、文案、FAQ 与自定义属性。</p>
+              <div class="schema-recognition" id="schema-recognition" aria-label="Schema 字段识别状态">
+                <span><b>标题</b><em id="recognition-title">等待读取</em></span>
+                <span><b>主题卖点</b><em id="recognition-summary">等待读取</em></span>
+                <span><b>FAQ</b><em id="recognition-faq">等待读取</em></span>
+                <span><b>自定义属性</b><em id="recognition-attributes">等待读取</em></span>
+                <span><b>商品图片</b><em id="recognition-images">等待读取</em></span>
+              </div>
+            </div>
+            <div class="form-section title-section">
+              <div class="field-heading">
+                <div><span class="section-index">02</span><h2>标题</h2></div>
+                <span><b id="title-count">0</b> / 128</span>
+              </div>
+              <input class="title-input" id="title" type="text" maxlength="128" placeholder="等待 AI 生成，或者直接输入英文标题">
+            </div>
+
+            <div class="form-section" id="image-section">
+              <div class="field-heading">
+                <div><span class="section-index">03</span><h2>类似品图片</h2></div>
+                <span id="image-summary">主图 0 / 4 · 副图 0</span>
+              </div>
+              <div class="image-block-heading"><strong>4 张类似品主图</strong><span>按顺序对应类似品 1–4</span></div>
+              <div class="image-grid main-image-grid" id="similar-main-images">
+                <label class="image-slot"><input id="main-image-1" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"><span class="slot-number">01</span><span class="slot-plus">＋</span><span class="slot-label">类似品 1</span><img alt="类似品 1 主图预览"></label>
+                <label class="image-slot"><input id="main-image-2" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"><span class="slot-number">02</span><span class="slot-plus">＋</span><span class="slot-label">类似品 2</span><img alt="类似品 2 主图预览"></label>
+                <label class="image-slot"><input id="main-image-3" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"><span class="slot-number">03</span><span class="slot-plus">＋</span><span class="slot-label">类似品 3</span><img alt="类似品 3 主图预览"></label>
+                <label class="image-slot"><input id="main-image-4" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"><span class="slot-number">04</span><span class="slot-plus">＋</span><span class="slot-label">类似品 4</span><img alt="类似品 4 主图预览"></label>
+              </div>
+              <div class="auxiliary-upload-row">
+                <label class="auxiliary-upload"><input id="auxiliary-image-pool" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" multiple><span>＋ 选择副图素材</span><small>至少 5 张，可一次多选</small></label>
+                <div class="auxiliary-image-list" id="auxiliary-image-list"><span>尚未上传副图</span></div>
+              </div>
+              <div class="assigned-panel">
+                <div class="image-block-heading"><strong>当前类似品图片组合</strong><span>1 张主图＋5 张副图，可单独换图</span></div>
+                <div class="assigned-images" id="assigned-images"></div>
+              </div>
+              <p class="field-note">图片默认只保留在本地；点击下方确认按钮后，才会上传当前四套商品实际用到的图片。</p>
+              <div class="photobank-panel">
+                <div><strong>阿里图片银行</strong><span id="photobank-status" role="status">尚未上传；不会自动操作店铺。</span></div>
+                <button class="button primary" id="upload-photobank" type="button" disabled>确认上传分配图片</button>
+              </div>
+            </div>
+
+            <div class="form-section split-fields" id="details-section">
+              <div class="field attribute-editor">
+                <div class="editor-heading"><span>自定义属性</span><button class="button quiet compact-button" id="add-custom-attribute" type="button">＋ 新增一项</button></div>
+                <div class="custom-attribute-rows" id="custom-attribute-rows"></div>
+                <small>每套由 AI 最多改 5 项；标准类目属性不会在这里改动。</small>
+              </div>
+              <label class="field">
+                <span>补充事实</span>
+                <textarea id="manual-facts" rows="7" placeholder="只填写图片中无法准确判断、但你确定真实的信息"></textarea>
+              </label>
+            </div>
+
+            <div class="form-section">
+              <label class="field">
+                <span>主题卖点 / Product Summary</span>
+                <textarea id="selling-points" rows="7" placeholder="建议每行一个卖点；后续会内置你的生成提示词"></textarea>
+              </label>
+              <div class="field compact-field"><span>FAQ 前 5 条</span><div class="faq-rows" id="faq-rows"></div></div>
+              <label class="field compact-field">
+                <span>本版本采用的关键词</span>
+                <textarea id="keywords" rows="3" placeholder="从词表中选择后会显示在这里，也可以手工调整"></textarea>
+              </label>
+            </div>
+            <div class="preview-summary hidden" id="preview-summary" role="status">
+              <div><span>本地预览</span><strong>尚未生成</strong></div>
+              <p>生成后只显示变更摘要；不会提交到阿里。</p>
+            </div>
+          </form>
+        </section>
+
+        <footer class="action-dock">
+          <div class="action-message" id="action-message" role="status">先上传商品图片和关键词表</div>
+          <div class="actions">
+            <button class="button quiet" id="new-manual-create" type="button">创建空白版本</button>
+            <button class="button ai" id="ai-generate" type="button">用 AI 生成 5 个版本</button>
+            <button class="button ai hidden" id="ai-generate-similar" type="button">AI 生成 4 套类似品</button>
+            <button class="button ai hidden" id="generate-previews" type="button">生成 4 份本地预览</button>
+            <button class="button primary hidden" id="generate-image-previews" type="button" disabled>生成含图片的完整预览</button>
+            <button class="button primary" id="save-task" type="button" disabled>保存任务</button>
+          </div>
+        </footer>
+      </section>
+
+      <section class="module-page" id="module-keywords" aria-labelledby="keywords-title" hidden>
+        <header class="page-header">
+          <div>
+            <p class="kicker">KEYWORD LIBRARY</p>
+            <h1 id="keywords-title">关键词表</h1>
+            <p>上传 XLSX、CSV 或 TXT。生成标题和卖点时，模型只从这份词表中选择合适的词。</p>
+          </div>
+          <div class="header-status"><span>已读取</span><strong id="word-count">0 个词</strong></div>
+        </header>
+
+        <section class="settings-surface keyword-surface">
+          <label class="keyword-drop">
+            <input id="word-file" type="file" accept=".csv,.txt,.xlsx,text/csv,text/plain,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+            <span class="drop-icon" aria-hidden="true">↥</span>
+            <strong>选择关键词表</strong>
+            <span id="word-summary">支持 XLSX、CSV、TXT；会自动去重</span>
+          </label>
+          <div class="keyword-preview">
+            <div class="surface-title"><h2>词表预览</h2><span id="word-file-name">尚未上传文件</span></div>
+            <div class="keyword-list" id="keyword-list">
+              <p class="empty-copy">上传后会在这里检查读取结果。</p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-ai-settings" aria-labelledby="ai-title" hidden>
+        <header class="page-header">
+          <div>
+            <p class="kicker">MODEL CONNECTION</p>
+            <h1 id="ai-title">AI 接口</h1>
+            <p>选择兼容接口和模型。只有连接测试与内容生成会产生模型用量。</p>
+          </div>
+          <div class="header-status"><span>当前接口</span><strong id="active-provider">OpenAI</strong></div>
+        </header>
+
+        <section class="settings-surface ai-surface">
+          <div class="settings-intro">
+            <span class="section-index">01</span>
+            <h2>当前模型</h2>
+            <p>先保存设置，再返回自动上品生成内容。</p>
+          </div>
+          <div class="settings-form">
+            <label class="field"><span>服务商</span><select id="provider"><option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option><option value="dashscope">阿里云百炼（北京）</option><option value="siliconflow">硅基流动</option><option value="custom">自定义兼容接口</option></select></label>
+            <label class="field"><span>Base URL</span><input id="base-url" type="url" autocomplete="off" spellcheck="false"></label>
+            <label class="field"><span>模型名称</span><input id="model" type="text" autocomplete="off" placeholder="填写平台显示的 Model ID"></label>
+            <label class="field"><span>API Key</span><div class="secret-field"><input id="api-key" type="password" autocomplete="off" placeholder="sk-..."><button id="toggle-key" type="button" aria-label="显示或隐藏 API Key">显示</button></div></label>
+            <label class="check-field"><input id="remember-key" type="checkbox"><span><strong>在这台电脑的浏览器中记住 API Key</strong><small>默认只保留到关闭浏览器；勾选后会写入本地浏览器存储。</small></span></label>
+            <div class="settings-actions"><button class="button quiet" id="save-ai" type="button">保存设置</button><button class="button primary" id="test-ai" type="button">测试连接</button></div>
+            <p class="inline-status" id="ai-status" role="status"></p>
+          </div>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-alibaba-settings" aria-labelledby="alibaba-title" hidden>
+        <header class="page-header">
+          <div>
+            <p class="kicker">ALIBABA OPEN PLATFORM</p>
+            <h1 id="alibaba-title">阿里接口</h1>
+            <p>连接国际站开放平台。图片只在你明确确认后上传；商品不会自动创建、修改或发布。</p>
+          </div>
+          <div class="header-status"><span>连接状态</span><strong id="ali-active-state">尚未验证</strong></div>
+        </header>
+
+        <section class="settings-surface ai-surface">
+          <div class="settings-intro">
+            <span class="section-index">01</span>
+            <h2>开放平台凭证</h2>
+            <p>App Key 和 App Secret 来自“应用配置及权限”。Access Token 是店铺授权后的调用凭证。</p>
+              <div class="api-scope-list">
+                <span>已接入接口</span>
+                <code>schema.get / schema.render</code>
+                <code>photobank.upload</code>
+                <small>Schema 接口只读；图片上传必须在自动上品页逐次确认，仍不会产生商品草稿。</small>
+            </div>
+          </div>
+          <div class="settings-form">
+            <label class="field"><span>API 网关</span><input id="ali-gateway" type="url" value="https://open-api.alibaba.com" spellcheck="false"></label>
+            <label class="field"><span>App Key</span><input id="ali-app-key" type="text" inputmode="numeric" autocomplete="off" placeholder="例如：511556"></label>
+            <label class="field"><span>App Secret</span><div class="secret-field"><input id="ali-app-secret" type="password" autocomplete="off"><button class="secret-toggle" data-secret-target="ali-app-secret" type="button">显示</button></div></label>
+            <div class="oauth-panel">
+              <div class="oauth-head"><div><span>店铺授权</span><strong>获取 Access Token</strong></div><button class="button quiet" id="ali-authorize" type="button">打开阿里授权页</button></div>
+              <p>授权完成后会跳到 Alibaba.com。复制地址栏里的完整网址，粘贴到下方即可。</p>
+              <label class="field"><span>授权后网址或 Code</span><input id="ali-auth-code" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴包含 code=… 的网址，或直接粘贴授权码"></label>
+              <button class="button primary" id="ali-exchange" type="button">换取 Access Token</button>
+            </div>
+            <label class="field"><span>Access Token</span><div class="secret-field"><input id="ali-access-token" type="password" autocomplete="off"><button class="secret-toggle" data-secret-target="ali-access-token" type="button">显示</button></div></label>
+            <label class="field"><span>图片银行分组 ID（可选）</span><input id="ali-photobank-group" type="text" inputmode="numeric" autocomplete="off" placeholder="留空则上传到默认分组"></label>
+            <label class="check-field"><input id="ali-remember" type="checkbox"><span><strong>在这台电脑的浏览器中记住 Secret 和 Token</strong><small>默认只保留到关闭浏览器。勾选后会写入本机浏览器存储，请只在自己的电脑上使用。</small></span></label>
+            <div class="settings-actions"><button class="button quiet" id="ali-save" type="button">保存配置</button><button class="button primary" id="ali-test" type="button">测试阿里连接</button></div>
+            <p class="inline-status" id="ali-status" role="status"></p>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+    <aside class="product-drawer" id="product-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+      <header class="drawer-header">
+        <div><span>本地商品详情</span><h2 id="drawer-title">商品详情</h2><small id="drawer-subtitle">只读查看，不会提交到阿里</small></div>
+        <button class="drawer-close" id="drawer-close" type="button" aria-label="关闭商品详情">×</button>
+      </header>
+      <nav class="drawer-tabs" id="drawer-tabs" aria-label="商品详情分类"></nav>
+      <div class="drawer-content" id="drawer-content"></div>
+    </aside>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
