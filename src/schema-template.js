@@ -249,6 +249,19 @@ function imageRows(field) {
   return collectFields(field).filter(isImageRow);
 }
 
+function findSharedImageContainer(value) {
+  if (!value || typeof value !== 'object') return null;
+  const rows = asArray(value.field).filter(isImageRow);
+  if (rows.length) return { container: value, rows };
+  for (const child of Object.values(value)) {
+    for (const item of asArray(child)) {
+      const found = findSharedImageContainer(item);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function readAlibabaImages(field) {
   return imageRows(field).flatMap((row) => {
     const carrier = findImageValueCarrier(row);
@@ -274,8 +287,27 @@ function writeAlibabaImages(field, images) {
   const imageWrapperIndexes = wrappers
     .map((wrapper, index) => ({ index, rows: asArray(wrapper?.field).filter(isImageRow) }))
     .filter(({ rows }) => rows.length === 1);
-  if (!field || !imageWrapperIndexes.length) {
-    throw new Error('Schema 缺少可安全替换的图片结构');
+  if (!field) throw new Error('Schema 缺少可安全替换的图片结构');
+  if (!imageWrapperIndexes.length) {
+    const shared = findSharedImageContainer(field);
+    if (!shared) throw new Error('Schema 缺少可安全替换的图片结构');
+    const generatedRows = normalized.map((image, index) => {
+      const row = structuredClone(shared.rows[0]);
+      const carrier = findImageValueCarrier(row);
+      if (!carrier) throw new Error('Schema 缺少可安全替换的图片结构');
+      row['@_id'] = `scImages_${index}`;
+      carrier.node[carrier.key] = image.url;
+      carrier.metadataNode['@_fileId'] = image.fileId;
+      return row;
+    });
+    let inserted = false;
+    shared.container.field = asArray(shared.container.field).flatMap((row) => {
+      if (!isImageRow(row)) return [row];
+      if (inserted) return [];
+      inserted = true;
+      return generatedRows;
+    });
+    return;
   }
 
   const templateWrapper = imageWrapperIndexes[0] && wrappers[imageWrapperIndexes[0].index];
@@ -425,13 +457,42 @@ function maskMutableSchemaNodes(value) {
   );
 }
 
+function firstSchemaDifference(left, right, path = '$') {
+  if (Object.is(left, right)) return '';
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return path;
+    if (left.length !== right.length) return `${path}.length`;
+    for (let index = 0; index < left.length; index += 1) {
+      const fieldId = left[index]?.['@_id'] || right[index]?.['@_id'];
+      const childPath = fieldId ? `${path}[id=${fieldId}]` : `${path}[${index}]`;
+      const difference = firstSchemaDifference(left[index], right[index], childPath);
+      if (difference) return difference;
+    }
+    return '';
+  }
+  if (!left || !right || typeof left !== 'object' || typeof right !== 'object') {
+    const leftLength = typeof left === 'string' ? `:${left.length}` : '';
+    const rightLength = typeof right === 'string' ? `:${right.length}` : '';
+    return `${path}（${typeof left}${leftLength} -> ${typeof right}${rightLength}）`;
+  }
+  const keys = [...new Set([...Object.keys(left), ...Object.keys(right)])];
+  for (const key of keys) {
+    if (!Object.hasOwn(left, key) || !Object.hasOwn(right, key)) return `${path}.${key}`;
+    const difference = firstSchemaDifference(left[key], right[key], `${path}.${key}`);
+    if (difference) return difference;
+  }
+  return '';
+}
+
 export function assertOnlyMutableSchemaRolesChanged(sourceXml, previewXml) {
-  const sourceTree = parser.parse(String(sourceXml || ''));
+  const sourceTree = parser.parse(builder.build(parser.parse(String(sourceXml || ''))));
   const previewTree = parser.parse(String(previewXml || ''));
   const sourceProtected = maskMutableSchemaNodes(sourceTree);
   const previewProtected = maskMutableSchemaNodes(previewTree);
   if (JSON.stringify(sourceProtected) !== JSON.stringify(previewProtected)) {
-    throw new Error('预览修改了允许范围之外的 Schema 字段');
+    throw new Error(
+      `预览修改了允许范围之外的 Schema 字段：${firstSchemaDifference(sourceProtected, previewProtected)}`,
+    );
   }
   return true;
 }

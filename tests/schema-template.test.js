@@ -4,7 +4,11 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { analyzeProductSchema, createProductPreview } from '../src/schema-template.js';
+import {
+  analyzeProductSchema,
+  assertOnlyMutableSchemaRolesChanged,
+  createProductPreview,
+} from '../src/schema-template.js';
 
 const fixturePath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -250,6 +254,32 @@ test('createProductPreview replaces scImages with six Alibaba photo-bank images'
   assert.doesNotMatch(preview.previewXml, /old-0/);
 });
 
+test('createProductPreview replaces scImages stored in one shared image container', () => {
+  const compactImageSchemaXml = renderedAlibabaSchemaXml.replace(
+    '<complex-value><field id="scImages_0"><value fileId="old-0">https://img/old-0.jpg</value></field></complex-value>\n    <complex-value><field id="scImages_1"><value fileId="old-1">https://img/old-1.jpg</value></field></complex-value>',
+    '<complex-value><field id="scImages_0"><value fileId="old-0">https://img/old-0.jpg</value></field><field id="scImages_1"><value fileId="old-1">https://img/old-1.jpg</value></field></complex-value>',
+  );
+  assert.notEqual(compactImageSchemaXml, renderedAlibabaSchemaXml);
+  const alibabaImages = Array.from({ length: 6 }, (_, index) => ({
+    fileId: `shared-${index}`,
+    url: `https://img/shared-${index}.jpg`,
+  }));
+
+  const preview = createProductPreview(compactImageSchemaXml, {
+    title: 'New title',
+    sellingPoints: 'New summary',
+    faqItems: Array.from({ length: 5 }, (_, index) => ({
+      question: `Q${index}?`,
+      answer: `A${index}.`,
+    })),
+    customAttributes: [{ name: 'Material', value: 'Polyester' }],
+    alibabaImages,
+  });
+
+  assert.deepEqual(analyzeProductSchema(preview.previewXml).recognized.images.items, alibabaImages);
+  assert.doesNotMatch(preview.previewXml, /old-0|old-1/);
+});
+
 test('createProductPreview rejects incomplete Alibaba image metadata', () => {
   assert.throws(() => createProductPreview(renderedAlibabaSchemaXml, {
     title: 'New title',
@@ -264,4 +294,34 @@ test('createProductPreview rejects incomplete Alibaba image metadata', () => {
       url: 'https://img/x.jpg',
     })),
   }), /fileId 和 URL/);
+});
+
+test('assertOnlyMutableSchemaRolesChanged identifies the first protected field change', () => {
+  assert.throws(
+    () => assertOnlyMutableSchemaRolesChanged(
+      renderedAlibabaSchemaXml,
+      renderedAlibabaSchemaXml.replace('KEEP-SKU', 'CHANGED-SKU'),
+    ),
+    /field\[id=sku\]\.value/,
+  );
+});
+
+test('assertOnlyMutableSchemaRolesChanged ignores parser type drift after XML rebuilding', () => {
+  const schemaWithBooleanRule = renderedAlibabaSchemaXml.replace(
+    '<itemSchema>',
+    '<itemSchema><field id="catId"><rules><rule value="keep"/><rule value="true"/></rules></field>',
+  );
+  const preview = createProductPreview(schemaWithBooleanRule, {
+    title: 'New title',
+    sellingPoints: 'New summary',
+    faqItems: Array.from({ length: 5 }, (_, index) => ({
+      question: `Q${index}?`,
+      answer: `A${index}.`,
+    })),
+    customAttributes: [{ name: 'Material', value: 'Polyester' }],
+  });
+
+  assert.doesNotThrow(() => (
+    assertOnlyMutableSchemaRolesChanged(schemaWithBooleanRule, preview.previewXml)
+  ));
 });
