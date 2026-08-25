@@ -290,14 +290,27 @@ export async function loadAlibabaProductContext(
     language: 'ENGLISH',
     product_id: sourceProductId,
   }, fetchImpl, timestamp);
-  const secretId = String(encrypted.secret_id || '').trim();
-  if (!secretId) throw new Error('阿里未返回可读取商品详情的加密 ID');
+  const encryptResult = encrypted.alibaba_icbu_product_id_encrypt_response || encrypted;
+  const secretId = String(encryptResult.secret_id || '').trim();
+  if (!secretId) {
+    const code = String(encryptResult.code || encrypted.code || '').trim();
+    const detail = String(
+      encryptResult.message || encryptResult.msg || encrypted.message || encrypted.msg || '',
+    ).trim();
+    const error = new Error(
+      `${detail || '阿里未返回可读取商品详情的加密 ID'}${code ? `（错误码 ${code}）` : ''}`,
+    );
+    error.code = code;
+    error.requestId = encrypted.request_id;
+    throw error;
+  }
 
   const productBody = await callAlibabaApi(config, 'alibaba.icbu.product.get', {
     product_id: secretId,
     language: 'ENGLISH',
   }, fetchImpl, timestamp);
-  const product = productBody.product || {};
+  const productResult = productBody.alibaba_icbu_product_get_response || productBody;
+  const product = productResult.product || {};
   const categoryId = String(product.category_id || '').trim();
   if (!categoryId) throw new Error('无法从源商品确定类目 ID，已停止生成可写 Schema');
   const sourceProductType = String(product.product_type || '').trim();

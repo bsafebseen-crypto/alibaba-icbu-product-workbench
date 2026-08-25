@@ -209,15 +209,23 @@ test('loadAlibabaProductTemplate reads an existing product schema without changi
 test('loadAlibabaProductContext resolves category and source type before rendering schema', async () => {
   const requests = [];
   const responses = [
-    { code: '0', request_id: 'encrypt-request', secret_id: 'encrypted-product-id' },
+    {
+      code: '0',
+      request_id: 'encrypt-request',
+      alibaba_icbu_product_id_encrypt_response: {
+        secret_id: 'encrypted-product-id',
+      },
+    },
     {
       code: '0',
       request_id: 'product-request',
-      product: {
-        product_id: 'encrypted-product-id',
-        category_id: '32905',
-        language: 'ENGLISH',
-        product_type: 'sourcing',
+      alibaba_icbu_product_get_response: {
+        product: {
+          product_id: 'encrypted-product-id',
+          category_id: '32905',
+          language: 'ENGLISH',
+          product_type: 'sourcing',
+        },
       },
     },
     {
@@ -291,6 +299,30 @@ test('loadAlibabaProductContext blocks when product details omit the category', 
       accessToken: 'token',
     }, { productId: '1601915922577' }, fetchImpl, 1700000000000),
     /无法从源商品确定类目 ID/,
+  );
+});
+
+test('loadAlibabaProductContext surfaces an encrypt business error', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        code: '15',
+        message: 'The product ID is unavailable',
+        request_id: 'encrypt-failed-request',
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => loadAlibabaProductContext({
+      gatewayUrl: 'https://gateway.example.com',
+      appKey: '511556',
+      appSecret: 'secret',
+      accessToken: 'token',
+    }, { productId: '1601933369105' }, fetchImpl, 1700000000000),
+    /The product ID is unavailable.*15/,
   );
 });
 
