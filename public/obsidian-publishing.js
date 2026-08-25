@@ -4,9 +4,31 @@ export function createObsidianPublishingState() {
     batch: null,
     basePlanId: '',
     sourceProductId: '',
+    sourceContext: null,
+    variants: [],
+    filesByPlan: {},
+    uploads: {},
+    previews: [],
     loading: false,
     error: '',
   };
+}
+
+export function imageFileKey(file) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+export function resolveUploadedImages(variants, filesByPlan, uploads) {
+  return Object.fromEntries(variants.map((variant) => {
+    const files = filesByPlan[variant.id] || [];
+    if (files.length !== 6) throw new Error(`${variant.id} 必须选择 6 张图片`);
+    const images = files.map((file) => {
+      const upload = uploads[imageFileKey(file)];
+      if (!upload) throw new Error(`${file.name} 尚未上传到图片银行`);
+      return { fileId: upload.fileId, url: upload.photobankUrl };
+    });
+    return [variant.id, images];
+  }));
 }
 
 export function remainingPlans(batch, basePlanId) {
@@ -20,7 +42,13 @@ function text(element, value) {
   if (element) element.textContent = value;
 }
 
-export function initObsidianPublishing({ requestJson, documentRef = globalThis.document } = {}) {
+export function initObsidianPublishing({
+  requestJson,
+  getAlibabaConfig = () => ({}),
+  getPhotobankGroupId = () => '',
+  documentRef = globalThis.document,
+  windowRef = globalThis.window,
+} = {}) {
   const section = documentRef?.getElementById('module-obsidian-publishing');
   if (!section) return null;
 
@@ -34,11 +62,34 @@ export function initObsidianPublishing({ requestJson, documentRef = globalThis.d
     plans: documentRef.getElementById('obsidian-plan-list'),
     sourceProductId: documentRef.getElementById('obsidian-source-product-id'),
     remaining: documentRef.getElementById('obsidian-remaining-summary'),
+    loadSource: documentRef.getElementById('obsidian-load-source'),
+    sourceStatus: documentRef.getElementById('obsidian-source-status'),
+    variants: documentRef.getElementById('obsidian-variant-list'),
+    uploadImages: documentRef.getElementById('obsidian-upload-images'),
+    generatePreviews: documentRef.getElementById('obsidian-generate-previews'),
+    previewStatus: documentRef.getElementById('obsidian-preview-status'),
   };
 
   function setStatus(message, kind = '') {
     text(elements.status, message);
     elements.status.dataset.kind = kind;
+  }
+
+  function setPreviewStatus(message, kind = '') {
+    text(elements.previewStatus, message);
+    elements.previewStatus.dataset.kind = kind;
+  }
+
+  function invalidatePreparedData() {
+    state.sourceContext = null;
+    state.variants = [];
+    state.filesByPlan = {};
+    state.uploads = {};
+    state.previews = [];
+    elements.uploadImages.disabled = true;
+    elements.generatePreviews.disabled = true;
+    elements.variants.innerHTML = '<p>载入母商品 Schema 后显示剩余四套方案。</p>';
+    setPreviewStatus('尚未准备图片。');
   }
 
   function renderBatchList() {
@@ -85,6 +136,47 @@ export function initObsidianPublishing({ requestJson, documentRef = globalThis.d
     }
   }
 
+  function renderVariants() {
+    elements.variants.replaceChildren();
+    for (const [index, variant] of state.variants.entries()) {
+      const card = documentRef.createElement('article');
+      card.className = 'obsidian-variant-card';
+      card.dataset.planId = variant.id;
+      const heading = documentRef.createElement('div');
+      heading.className = 'obsidian-variant-heading';
+      const copy = documentRef.createElement('div');
+      const title = documentRef.createElement('strong');
+      title.textContent = `类似品 ${index + 1} · ${variant.title}`;
+      const detail = documentRef.createElement('small');
+      detail.textContent = `${variant.id} · 5 FAQ · 10 自定义属性`;
+      copy.append(title, detail);
+      const status = documentRef.createElement('span');
+      status.className = 'obsidian-variant-status';
+      status.textContent = '待选 6 张图片';
+      heading.append(copy, status);
+
+      const label = documentRef.createElement('label');
+      label.className = 'obsidian-image-picker';
+      const input = documentRef.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/jpeg,image/png,image/webp';
+      input.multiple = true;
+      input.dataset.planId = variant.id;
+      const instruction = documentRef.createElement('span');
+      instruction.textContent = '选择 6 张：第 1 张作为主图，后 5 张作为副图';
+      label.append(input, instruction);
+
+      const content = documentRef.createElement('details');
+      const summary = documentRef.createElement('summary');
+      summary.textContent = '查看将替换的 Listing 内容';
+      const description = documentRef.createElement('p');
+      description.textContent = variant.sellingPoints;
+      content.append(summary, description);
+      card.append(heading, label, content);
+      elements.variants.append(card);
+    }
+  }
+
   async function refreshBatches() {
     state.loading = true;
     elements.refresh.disabled = true;
@@ -117,6 +209,7 @@ export function initObsidianPublishing({ requestJson, documentRef = globalThis.d
         body: JSON.stringify({ relativePath: elements.select.value }),
       });
       state.basePlanId = '';
+      invalidatePreparedData();
       renderPlans();
       setStatus('批次校验通过。请选择已经手动发布的母商品方案。', 'success');
     } catch (error) {
@@ -130,13 +223,133 @@ export function initObsidianPublishing({ requestJson, documentRef = globalThis.d
     if (event.target.name !== 'obsidian-base-plan') return;
     state.basePlanId = event.target.value;
     const variants = remainingPlans(state.batch, state.basePlanId);
+    invalidatePreparedData();
     text(elements.remaining, `已排除母商品；将准备 ${variants.map((plan) => plan.id).join('、')} 共 4 个类似品。`);
   });
   elements.sourceProductId.addEventListener('input', () => {
     state.sourceProductId = elements.sourceProductId.value.trim();
+  });
+  elements.loadSource.addEventListener('click', async () => {
+    state.sourceProductId = elements.sourceProductId.value.trim();
+    if (!state.batch || !state.basePlanId) {
+      text(elements.sourceStatus, '请先载入批次并选择母商品方案。');
+      return;
+    }
+    if (!/^\d+$/.test(state.sourceProductId)) {
+      text(elements.sourceStatus, '母商品 ID 必须是数字。');
+      return;
+    }
+    elements.loadSource.disabled = true;
+    text(elements.sourceStatus, '正在读取商品详情、真实类目和发布 Schema…');
+    try {
+      state.sourceContext = await requestJson('/api/obsidian/source-product', {
+        method: 'POST',
+        body: JSON.stringify({ config: getAlibabaConfig(), productId: state.sourceProductId }),
+      });
+      state.variants = remainingPlans(state.batch, state.basePlanId);
+      state.filesByPlan = {};
+      state.uploads = {};
+      state.previews = [];
+      renderVariants();
+      text(
+        elements.sourceStatus,
+        `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；未修改商品。`,
+      );
+      setPreviewStatus('请为每个类似品选择 6 张图片。');
+    } catch (error) {
+      state.error = error.message;
+      text(elements.sourceStatus, error.message);
+    } finally {
+      elements.loadSource.disabled = false;
+    }
+  });
+  elements.variants.addEventListener('change', (event) => {
+    const planId = event.target.dataset?.planId;
+    if (!planId || event.target.type !== 'file') return;
+    const files = [...event.target.files];
+    state.filesByPlan[planId] = files;
+    state.previews = [];
+    elements.generatePreviews.disabled = true;
+    const card = event.target.closest('.obsidian-variant-card');
+    const status = card?.querySelector('.obsidian-variant-status');
+    text(status, files.length === 6 ? '6 张已选择 · 待上传' : `已选择 ${files.length} 张 · 必须为 6 张`);
+    elements.uploadImages.disabled = !state.variants.every((variant) => (
+      state.filesByPlan[variant.id]?.length === 6
+    ));
+  });
+  elements.uploadImages.addEventListener('click', async () => {
+    let selected;
+    try {
+      selected = state.variants.flatMap((variant) => {
+        const files = state.filesByPlan[variant.id] || [];
+        if (files.length !== 6) throw new Error(`${variant.id} 必须选择 6 张图片`);
+        return files;
+      });
+    } catch (error) {
+      setPreviewStatus(error.message, 'error');
+      return;
+    }
+    const unique = [...new Map(selected.map((file) => [imageFileKey(file), file])).values()];
+    const pending = unique.filter((file) => !state.uploads[imageFileKey(file)]);
+    if (pending.length && !windowRef.confirm(
+      `将 ${pending.length} 张图片上传到当前店铺的阿里图片银行。\n\n这不会创建、修改或发布商品。是否继续？`,
+    )) return;
+
+    elements.uploadImages.disabled = true;
+    try {
+      for (const [index, file] of pending.entries()) {
+        setPreviewStatus(`正在上传 ${index + 1} / ${pending.length}：${file.name}`);
+        const upload = await requestJson('/api/alibaba/photobank/upload', {
+          method: 'POST',
+          body: JSON.stringify({
+            config: getAlibabaConfig(),
+            groupId: getPhotobankGroupId(),
+            image: { fileName: file.name, dataUrl: await fileToDataUrl(file) },
+          }),
+        });
+        state.uploads[imageFileKey(file)] = upload;
+      }
+      resolveUploadedImages(state.variants, state.filesByPlan, state.uploads);
+      elements.generatePreviews.disabled = false;
+      setPreviewStatus(`${unique.length} 张实际使用图片已在图片银行就绪；尚未创建商品。`, 'success');
+      for (const variant of state.variants) {
+        const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(variant.id)}"]`);
+        text(card?.querySelector('.obsidian-variant-status'), '图片银行已就绪');
+      }
+    } catch (error) {
+      setPreviewStatus(`上传中断：${error.message}。成功项不会重复上传。`, 'error');
+    } finally {
+      elements.uploadImages.disabled = false;
+    }
+  });
+  elements.generatePreviews.addEventListener('click', async () => {
+    elements.generatePreviews.disabled = true;
+    setPreviewStatus('正在生成四份完整本地 Schema；不会提交商品。');
+    try {
+      const imagesByPlan = resolveUploadedImages(state.variants, state.filesByPlan, state.uploads);
+      const result = await requestJson('/api/obsidian/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          relativePath: state.batch.source.relativePath,
+          basePlanId: state.basePlanId,
+          schemaXml: state.sourceContext.schemaXml,
+          imagesByPlan,
+        }),
+      });
+      state.previews = result.previews;
+      for (const preview of state.previews) {
+        const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(preview.planId)}"]`);
+        text(card?.querySelector('.obsidian-variant-status'), `完整预览通过 · ${preview.fingerprint.slice(0, 10)}`);
+      }
+      setPreviewStatus('四份完整预览均通过：标题、卖点、FAQ、10 条属性和 6 张图片已替换，受保护字段保持不变。', 'success');
+    } catch (error) {
+      setPreviewStatus(error.message, 'error');
+      elements.generatePreviews.disabled = false;
+    }
   });
 
   renderBatchList();
   renderPlans();
   return { state, refreshBatches };
 }
+import { fileToDataUrl } from './similar-product-ui.js';

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   callAlibabaApi,
   exchangeAlibabaCode,
+  loadAlibabaProductContext,
   loadAlibabaProductTemplate,
   refreshAlibabaToken,
   signAlibabaGopRequest,
@@ -201,6 +202,94 @@ test('loadAlibabaProductTemplate reads an existing product schema without changi
     requestId: 'request-template',
     traceId: 'trace-template',
   });
+});
+
+test('loadAlibabaProductContext resolves category and source type before rendering schema', async () => {
+  const requests = [];
+  const responses = [
+    { code: '0', request_id: 'encrypt-request', secret_id: 'encrypted-product-id' },
+    {
+      code: '0',
+      request_id: 'product-request',
+      product: {
+        product_id: 'encrypted-product-id',
+        category_id: '32905',
+        language: 'ENGLISH',
+        product_type: 'sourcing',
+      },
+    },
+    {
+      code: '0',
+      request_id: 'render-request',
+      alibaba_icbu_product_schema_render_response: {
+        biz_success: true,
+        data: '<itemSchema><field id="subject" /></itemSchema>',
+        trace_id: 'render-trace',
+      },
+    },
+  ];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    const body = responses.shift();
+    return { ok: true, status: 200, async json() { return body; } };
+  };
+
+  const result = await loadAlibabaProductContext({
+    gatewayUrl: 'https://gateway.example.com',
+    appKey: '511556',
+    appSecret: 'secret',
+    accessToken: 'token',
+  }, { productId: '1601915922577' }, fetchImpl, 1700000000000);
+
+  assert.deepEqual(requests.map(({ url }) => url), [
+    'https://gateway.example.com/sync?method=alibaba.icbu.product.id.encrypt',
+    'https://gateway.example.com/sync?method=alibaba.icbu.product.get',
+    'https://gateway.example.com/sync?method=alibaba.icbu.product.schema.render',
+  ]);
+  assert.equal(requests[0].body.language, 'ENGLISH');
+  assert.equal(requests[0].body.product_id, '1601915922577');
+  assert.equal(requests[1].body.product_id, 'encrypted-product-id');
+  assert.equal(requests[1].body.language, 'ENGLISH');
+  assert.deepEqual(JSON.parse(requests[2].body.param_product_top_publish_request), {
+    publish_type: 'default',
+    product_id: '1601915922577',
+    cat_id: '32905',
+    language: 'en_US',
+    version: 'trade.1.1',
+  });
+  assert.deepEqual(result, {
+    sourceProductId: '1601915922577',
+    sourceProductType: 'sourcing',
+    categoryId: '32905',
+    language: 'en_US',
+    publishType: 'default',
+    version: 'trade.1.1',
+    schemaXml: '<itemSchema><field id="subject" /></itemSchema>',
+    requestId: 'render-request',
+    traceId: 'render-trace',
+  });
+});
+
+test('loadAlibabaProductContext blocks when product details omit the category', async () => {
+  const responses = [
+    { code: '0', secret_id: 'encrypted-product-id' },
+    { code: '0', product: { product_type: 'sourcing', language: 'ENGLISH' } },
+  ];
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    async json() { return responses.shift(); },
+  });
+
+  await assert.rejects(
+    () => loadAlibabaProductContext({
+      gatewayUrl: 'https://gateway.example.com',
+      appKey: '511556',
+      appSecret: 'secret',
+      accessToken: 'token',
+    }, { productId: '1601915922577' }, fetchImpl, 1700000000000),
+    /无法从源商品确定类目 ID/,
+  );
 });
 
 test('uploadAlibabaPhoto sends the official multipart TOP request and normalizes the result', async () => {

@@ -1641,7 +1641,11 @@ elements['save-task'].addEventListener('click', async () => {
 
 restoreAiProfile();
 restoreAlibabaProfile();
-initObsidianPublishing({ requestJson });
+initObsidianPublishing({
+  requestJson,
+  getAlibabaConfig,
+  getPhotobankGroupId: () => elements['ali-photobank-group'].value.trim(),
+});
 renderKeywords();
 renderEditor();
 loadProductPool();

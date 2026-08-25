@@ -532,6 +532,10 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
     assert.match(page, /id="module-obsidian-publishing"/);
     assert.match(page, /id="obsidian-file-select"/);
     assert.match(page, /id="obsidian-plan-list"/);
+    assert.match(page, /id="obsidian-load-source"/);
+    assert.match(page, /id="obsidian-variant-list"/);
+    assert.match(page, /id="obsidian-upload-images"/);
+    assert.match(page, /id="obsidian-generate-previews"/);
 
     const controller = await fetch(`${baseUrl}/obsidian-publishing.js`);
     assert.equal(controller.status, 200);
@@ -539,4 +543,79 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('POST /api/obsidian/source-product loads read-only context and schema analysis', async () => {
+  let received;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/source-product`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appKey: 'key' }, productId: '1601915922577' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      sourceProductId: '1601915922577',
+      categoryId: '32905',
+      schemaXml: '<itemSchema />',
+      analysis: { warnings: [] },
+    });
+    assert.deepEqual(received, { config: { appKey: 'key' }, input: { productId: '1601915922577' } });
+  }, {
+    loadAlibabaProductContext: async (config, input) => {
+      received = { config, input };
+      return { sourceProductId: input.productId, categoryId: '32905', schemaXml: '<itemSchema />' };
+    },
+    analyzeProductSchema: () => ({ warnings: [] }),
+  });
+});
+
+test('POST /api/obsidian/preview builds four fingerprinted previews from the stored batch', async () => {
+  await withServer(async (baseUrl) => {
+    const imagesByPlan = Object.fromEntries(Array.from({ length: 4 }, (_, index) => [
+      `variant-${index + 1}`,
+      Array.from({ length: 6 }, (__, imageIndex) => ({ fileId: `${index}-${imageIndex}`, url: `https://img/${index}-${imageIndex}` })),
+    ]));
+    const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md',
+        basePlanId: 'base',
+        schemaXml: '<itemSchema />',
+        imagesByPlan,
+      }),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.previews.map(({ planId, fingerprint }) => ({ planId, fingerprint })), [
+      { planId: 'variant-1', fingerprint: 'hash-variant-1' },
+      { planId: 'variant-2', fingerprint: 'hash-variant-2' },
+      { planId: 'variant-3', fingerprint: 'hash-variant-3' },
+      { planId: 'variant-4', fingerprint: 'hash-variant-4' },
+    ]);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
+    createObsidianVariants: () => Array.from({ length: 4 }, (_, index) => ({ planId: `variant-${index + 1}` })),
+    createStrictProductPreview: (schemaXml, variant) => {
+      assert.equal(schemaXml, '<itemSchema />');
+      assert.equal(variant.alibabaImages.length, 6);
+      return { fingerprint: `hash-${variant.planId}`, changedFields: ['title'] };
+    },
+  });
+});
+
+test('POST /api/obsidian/preview rejects missing image assignments before schema generation', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relativePath: 'batch.md', basePlanId: 'base', schemaXml: '<itemSchema />', imagesByPlan: {} }),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /variant-1.*6 张图片/);
+  }, {
+    readObsidianBatch: async () => ({ plans: [] }),
+    createObsidianVariants: () => Array.from({ length: 4 }, (_, index) => ({ planId: `variant-${index + 1}` })),
+  });
 });

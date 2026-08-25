@@ -277,4 +277,64 @@ export async function loadAlibabaProductTemplate(
   };
 }
 
+export async function loadAlibabaProductContext(
+  config,
+  { productId } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const sourceProductId = String(productId || '').trim();
+  if (!/^\d+$/.test(sourceProductId)) throw new Error('母商品 ID 必须是数字');
+
+  const encrypted = await callAlibabaApi(config, 'alibaba.icbu.product.id.encrypt', {
+    language: 'ENGLISH',
+    product_id: sourceProductId,
+  }, fetchImpl, timestamp);
+  const secretId = String(encrypted.secret_id || '').trim();
+  if (!secretId) throw new Error('阿里未返回可读取商品详情的加密 ID');
+
+  const productBody = await callAlibabaApi(config, 'alibaba.icbu.product.get', {
+    product_id: secretId,
+    language: 'ENGLISH',
+  }, fetchImpl, timestamp);
+  const product = productBody.product || {};
+  const categoryId = String(product.category_id || '').trim();
+  if (!categoryId) throw new Error('无法从源商品确定类目 ID，已停止生成可写 Schema');
+  const sourceProductType = String(product.product_type || '').trim();
+  if (!sourceProductType) throw new Error('无法从源商品确定商品类型，已停止生成可写 Schema');
+
+  const publishContext = {
+    categoryId,
+    language: 'en_US',
+    publishType: 'default',
+    version: 'trade.1.1',
+  };
+  const rendered = await callAlibabaApi(config, 'alibaba.icbu.product.schema.render', {
+    param_product_top_publish_request: {
+      publish_type: publishContext.publishType,
+      product_id: sourceProductId,
+      cat_id: publishContext.categoryId,
+      language: publishContext.language,
+      version: publishContext.version,
+    },
+  }, fetchImpl, timestamp);
+  const result = rendered.alibaba_icbu_product_schema_render_response || {};
+  if (result.biz_success !== true && result.biz_success !== 'true') {
+    const error = new Error(result.message || '阿里未能读取这个母商品的发布 Schema');
+    error.code = result.msg_code;
+    error.traceId = result.trace_id;
+    throw error;
+  }
+  if (!result.data) throw new Error('阿里已返回成功，但母商品 Schema 内容为空');
+
+  return {
+    sourceProductId,
+    sourceProductType,
+    ...publishContext,
+    schemaXml: result.data,
+    requestId: rendered.request_id || '',
+    traceId: result.trace_id || '',
+  };
+}
+
 export { DEFAULT_GATEWAY };

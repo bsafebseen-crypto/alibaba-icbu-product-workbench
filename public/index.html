@@ -310,15 +310,25 @@
           <div class="panel-band teal"><strong>2. 指定已经发布的母商品</strong><span id="obsidian-batch-summary">尚未载入批次</span></div>
           <div class="obsidian-source-row">
             <label><span>阿里国际站母商品 ID</span><input id="obsidian-source-product-id" type="text" inputmode="numeric" autocomplete="off" placeholder="在这里填写你已经发布的商品 ID"></label>
-            <p>ID 只保留在当前页面状态；本阶段不会读取或修改该商品。</p>
+            <div><button class="button primary blue-button" id="obsidian-load-source" type="button">只读加载母商品 Schema</button><p id="obsidian-source-status" role="status">需要先在“阿里接口”中完成授权配置。</p></div>
           </div>
           <fieldset class="obsidian-plan-list" id="obsidian-plan-list"><legend>选择与该商品对应的方案</legend></fieldset>
           <p class="obsidian-remaining" id="obsidian-remaining-summary">选择母商品方案后，这里会显示剩余 4 个类似品。</p>
         </section>
 
+        <section class="console-panel obsidian-panel">
+          <div class="panel-band orange"><strong>3. 四个类似品图片与完整预览</strong><span>图片上传需二次确认</span></div>
+          <div class="obsidian-variant-list" id="obsidian-variant-list"><p>载入母商品 Schema 后显示剩余四套方案。</p></div>
+          <div class="obsidian-preview-actions">
+            <p id="obsidian-preview-status" role="status">尚未准备图片。</p>
+            <button class="button quiet" id="obsidian-upload-images" type="button" disabled>确认上传所选图片</button>
+            <button class="button primary" id="obsidian-generate-previews" type="button" disabled>生成四份完整预览</button>
+          </div>
+        </section>
+
         <section class="console-panel obsidian-panel locked-panel" aria-disabled="true">
-          <div class="panel-band"><strong>3–5. Schema、图片、草稿和正式发布</strong><span>后续阶段</span></div>
-          <p>当前开发阶段保持锁定：先完成批次与母商品对应关系，再接入只读 Schema 预览和逐个草稿测试。</p>
+          <div class="panel-band"><strong>4–5. 草稿和可信正式发布</strong><span>仍然锁定</span></div>
+          <p>完整预览通过后才会进入逐商品确认的草稿测试；正式发布不会在这一阶段启用。</p>
         </section>
       </section>
 

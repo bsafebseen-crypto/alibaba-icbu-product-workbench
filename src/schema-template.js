@@ -414,3 +414,24 @@ export function createProductPreview(schemaXml, variant = {}) {
     warnings: [],
   };
 }
+
+function maskMutableSchemaNodes(value) {
+  if (Array.isArray(value)) return value.map(maskMutableSchemaNodes);
+  if (!value || typeof value !== 'object') return value;
+  const role = matchRole(value);
+  if (role) return { __mutableRole: role };
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, maskMutableSchemaNodes(child)]),
+  );
+}
+
+export function assertOnlyMutableSchemaRolesChanged(sourceXml, previewXml) {
+  const sourceTree = parser.parse(String(sourceXml || ''));
+  const previewTree = parser.parse(String(previewXml || ''));
+  const sourceProtected = maskMutableSchemaNodes(sourceTree);
+  const previewProtected = maskMutableSchemaNodes(previewTree);
+  if (JSON.stringify(sourceProtected) !== JSON.stringify(previewProtected)) {
+    throw new Error('预览修改了允许范围之外的 Schema 字段');
+  }
+  return true;
+}

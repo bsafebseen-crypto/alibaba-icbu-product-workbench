@@ -10,6 +10,7 @@ import {
 } from './ai-client.js';
 import {
   exchangeAlibabaCode as defaultExchangeAlibabaCode,
+  loadAlibabaProductContext as defaultLoadAlibabaProductContext,
   loadAlibabaProductTemplate as defaultLoadAlibabaProductTemplate,
   refreshAlibabaToken as defaultRefreshAlibabaToken,
   testAlibabaConnection as defaultTestAlibabaConnection,
@@ -22,6 +23,10 @@ import {
   listObsidianBatches as defaultListObsidianBatches,
   readObsidianBatch as defaultReadObsidianBatch,
 } from './obsidian-listing.js';
+import {
+  createObsidianVariants as defaultCreateObsidianVariants,
+  createStrictProductPreview as defaultCreateStrictProductPreview,
+} from './obsidian-variant.js';
 import {
   analyzeProductSchema as defaultAnalyzeProductSchema,
   createProductPreview as defaultCreateProductPreview,
@@ -125,6 +130,7 @@ export function createServer(options = {}) {
   const exchangeAlibabaCode = options.exchangeAlibabaCode ?? defaultExchangeAlibabaCode;
   const refreshAlibabaToken = options.refreshAlibabaToken ?? defaultRefreshAlibabaToken;
   const loadAlibabaProductTemplate = options.loadAlibabaProductTemplate ?? defaultLoadAlibabaProductTemplate;
+  const loadAlibabaProductContext = options.loadAlibabaProductContext ?? defaultLoadAlibabaProductContext;
   const uploadAlibabaPhoto = options.uploadAlibabaPhoto ?? defaultUploadAlibabaPhoto;
   const generateProducts = options.generateProducts ?? defaultGenerateProducts;
   const generateSimilarProducts = options.generateSimilarProducts ?? defaultGenerateSimilarProducts;
@@ -136,6 +142,8 @@ export function createServer(options = {}) {
   const obsidianRoot = options.obsidianRoot ?? DEFAULT_OBSIDIAN_ROOT;
   const listObsidianBatches = options.listObsidianBatches ?? defaultListObsidianBatches;
   const readObsidianBatch = options.readObsidianBatch ?? defaultReadObsidianBatch;
+  const createObsidianVariants = options.createObsidianVariants ?? defaultCreateObsidianVariants;
+  const createStrictProductPreview = options.createStrictProductPreview ?? defaultCreateStrictProductPreview;
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -163,6 +171,39 @@ export function createServer(options = {}) {
         const body = await readJson(request);
         try {
           sendJson(response, 200, await readObsidianBatch(obsidianRoot, body.relativePath));
+        } catch (error) {
+          if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;
+          throw error;
+        }
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/source-product') {
+        const body = await readJson(request);
+        const context = await loadAlibabaProductContext(body.config, { productId: body.productId });
+        sendJson(response, 200, {
+          ...context,
+          analysis: analyzeProductSchema(context.schemaXml),
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/preview') {
+        const body = await readJson(request);
+        try {
+          const batch = await readObsidianBatch(obsidianRoot, body.relativePath);
+          const variants = createObsidianVariants(batch, body.basePlanId);
+          const previews = variants.map((variant) => {
+            const alibabaImages = body.imagesByPlan?.[variant.planId];
+            if (!Array.isArray(alibabaImages) || alibabaImages.length !== 6) {
+              throw new Error(`${variant.planId} 必须分配并上传 6 张图片`);
+            }
+            return {
+              planId: variant.planId,
+              ...createStrictProductPreview(body.schemaXml, { ...variant, alibabaImages }),
+            };
+          });
+          sendJson(response, 200, { previews });
         } catch (error) {
           if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;
           throw error;
