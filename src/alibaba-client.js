@@ -360,8 +360,10 @@ export async function getAlibabaPublishingCapability(
   const normalizedLanguage = String(language || '').trim();
   if (!catId || !normalizedLanguage) throw new Error('发品权限检查缺少类目或语种');
   const body = await callAlibabaApi(config, 'alibaba.icbu.product.type.available.get', {
-    cat_id: catId,
-    language: normalizedLanguage,
+    type_request: {
+      cat_id: catId,
+      language: normalizedLanguage,
+    },
   }, fetchImpl, timestamp);
   const response = body.alibaba_icbu_product_type_available_get_response || body;
   const result = response.result || response.data || response;

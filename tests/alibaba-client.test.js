@@ -350,8 +350,12 @@ test('getAlibabaPublishingCapability reads source and wholesale permissions', as
   }, { categoryId: '32905', language: 'en_US' }, fetchImpl, 1700000000000);
 
   assert.equal(request.url, 'https://gateway.example.com/sync?method=alibaba.icbu.product.type.available.get');
-  assert.equal(request.body.cat_id, '32905');
-  assert.equal(request.body.language, 'en_US');
+  assert.deepEqual(JSON.parse(request.body.type_request), {
+    cat_id: '32905',
+    language: 'en_US',
+  });
+  assert.equal(request.body.cat_id, undefined);
+  assert.equal(request.body.language, undefined);
   assert.deepEqual(result, {
     supportPostSourcing: true,
     supportPostWholesale: false,
