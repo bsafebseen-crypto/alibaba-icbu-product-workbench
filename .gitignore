@@ -4,4 +4,5 @@ data/tasks/
 .env.*
 *.log
 .superpowers/
+.worktrees/
 tmp/
