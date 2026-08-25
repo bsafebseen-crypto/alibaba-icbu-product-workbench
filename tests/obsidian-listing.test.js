@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 import {
   extractListingPayload,
+  listObsidianBatches,
+  readObsidianBatch,
   validateListingBatch,
 } from '../src/obsidian-listing.js';
 
@@ -87,4 +92,48 @@ test('validateListingBatch rejects duplicate plan ids and blank values', () => {
   const blank = validPayload();
   blank.plans[0].faqs[0].answer = '   ';
   assert.throws(() => validateListingBatch(blank), /plans\[0\]\.faqs\[0\]\.answer 不能为空/);
+});
+
+test('listObsidianBatches finds nested Markdown and reports invalid files safely', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-listings-'));
+  await mkdir(path.join(root, 'vests'));
+  await writeFile(path.join(root, 'vests', 'valid.md'), markdownFor(validPayload()), 'utf8');
+  await writeFile(path.join(root, 'broken.md'), '# no machine block', 'utf8');
+  await writeFile(path.join(root, 'ignore.txt'), markdownFor(validPayload()), 'utf8');
+
+  const batches = await listObsidianBatches(root);
+
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches.map(({ relativePath }) => relativePath), ['broken.md', 'vests/valid.md']);
+  assert.equal(batches[0].valid, false);
+  assert.match(batches[0].error, /缺少阿里发品机器数据块/);
+  assert.deepEqual(
+    { valid: batches[1].valid, batchId: batches[1].batchId, batchName: batches[1].batchName },
+    { valid: true, batchId: 'reflective-vest-001', batchName: 'Reflective Vest' },
+  );
+});
+
+test('readObsidianBatch returns a validated batch for a relative Markdown path', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-read-'));
+  await writeFile(path.join(root, 'batch.md'), markdownFor(validPayload()), 'utf8');
+
+  const batch = await readObsidianBatch(root, 'batch.md');
+
+  assert.equal(batch.batchId, 'reflective-vest-001');
+  assert.equal(batch.source.relativePath, 'batch.md');
+  assert.equal(typeof batch.source.modifiedAt, 'string');
+});
+
+test('readObsidianBatch blocks traversal, absolute paths, and non-Markdown files', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-safe-'));
+  await writeFile(path.join(root, 'batch.txt'), markdownFor(validPayload()), 'utf8');
+
+  await assert.rejects(() => readObsidianBatch(root, '../outside.md'), /必须位于 Obsidian 发品目录内/);
+  await assert.rejects(() => readObsidianBatch(root, path.resolve(root, 'batch.txt')), /必须使用相对路径/);
+  await assert.rejects(() => readObsidianBatch(root, 'batch.txt'), /只允许读取 Markdown 文件/);
+});
+
+test('listObsidianBatches returns an empty list when the fixed root does not exist', async () => {
+  const parent = await mkdtemp(path.join(tmpdir(), 'obsidian-missing-'));
+  assert.deepEqual(await listObsidianBatches(path.join(parent, 'not-created')), []);
 });

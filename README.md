@@ -126,6 +126,22 @@ API Key 不写入任务 JSON、日志或 Obsidian。默认只放在浏览器会�
 
 产品池、运营概览、详情抽屉和 CSV 导出全部是本地只读/导出功能。当前代码没有接入 `schema.add.draft`、商品更新或正式发布调用；README 中提到的草稿接口仅代表后续边界，不代表已经启用。
 
+### Obsidian 五方案导入
+
+“Obsidian 上品”模块只扫描固定目录 `C:\obsidian\obsidian\国际站发品` 下的 Markdown 文件，不监听目录，也不会自动启动任务。每个可导入文件必须恰好包含一个版本化机器数据块：
+
+````markdown
+<!-- alibaba-listing-batch:start -->
+```json
+{"schemaVersion":1,"batchId":"reflective-vest-001","batchName":"Reflective Vest","plans":[]}
+```
+<!-- alibaba-listing-batch:end -->
+````
+
+`plans` 必须正好有 5 套；每套需要唯一 `id`、非空 `title`、`sellingPoints`、5 组完整 `faqs` 和 10 组名称不重复的 `customAttributes`。旧版本、缺项、重复方案或目录外路径会被阻止。
+
+载入后选择已经手动发布的母商品方案，并在页面里填写对应商品 ID；工作台会保留其余四套方案的原始顺序。当前阶段只完成本地导入和选择，不读取阿里商品、不上传图片、不创建草稿，也不产生模型 Token 用量。商品 ID 只存在于当前页面状态，不会写入 Git。
+
 ## 开发验证
 
 ```powershell

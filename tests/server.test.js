@@ -467,3 +467,76 @@ test('GET / serves the workbench page and client script', async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test('GET /api/obsidian/batches returns sanitized read-only batch metadata', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/batches`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      rootAvailable: true,
+      batches: [{ relativePath: 'vests/batch.md', valid: true, batchId: 'batch-1' }],
+    });
+  }, {
+    obsidianRoot: 'C:\\vault\\listings',
+    listObsidianBatches: async (root) => {
+      assert.equal(root, 'C:\\vault\\listings');
+      return [{ relativePath: 'vests/batch.md', valid: true, batchId: 'batch-1' }];
+    },
+  });
+});
+
+test('POST /api/obsidian/batch loads one validated relative path', async () => {
+  let receivedPath;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relativePath: 'vests/batch.md' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { batchId: 'batch-1', plans: [1, 2, 3, 4, 5] });
+    assert.equal(receivedPath, 'vests/batch.md');
+  }, {
+    obsidianRoot: 'C:\\vault\\listings',
+    readObsidianBatch: async (root, relativePath) => {
+      assert.equal(root, 'C:\\vault\\listings');
+      receivedPath = relativePath;
+      return { batchId: 'batch-1', plans: [1, 2, 3, 4, 5] };
+    },
+  });
+});
+
+test('POST /api/obsidian/batch returns 400 for an unsafe path', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ relativePath: '../outside.md' }),
+    });
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: '文件必须位于 Obsidian 发品目录内' });
+  }, {
+    readObsidianBatch: async () => {
+      throw new Error('文件必须位于 Obsidian 发品目录内');
+    },
+  });
+});
+
+test('GET / exposes the Obsidian publishing module and its browser controller', async () => {
+  const server = createServer({ rootDir: process.cwd() });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const page = await (await fetch(`${baseUrl}/`)).text();
+    assert.match(page, /data-module="obsidian-publishing"/);
+    assert.match(page, /id="module-obsidian-publishing"/);
+    assert.match(page, /id="obsidian-file-select"/);
+    assert.match(page, /id="obsidian-plan-list"/);
+
+    const controller = await fetch(`${baseUrl}/obsidian-publishing.js`);
+    assert.equal(controller.status, 200);
+    assert.match(await controller.text(), /initObsidianPublishing/);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});

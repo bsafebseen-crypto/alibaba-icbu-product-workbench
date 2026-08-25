@@ -18,6 +18,11 @@ import {
 import { createManualProducts, createSimilarProductsFromTemplate } from './core.js';
 import { parseKeywordWorkbook as defaultParseKeywordWorkbook } from './keyword-workbook.js';
 import {
+  DEFAULT_OBSIDIAN_ROOT,
+  listObsidianBatches as defaultListObsidianBatches,
+  readObsidianBatch as defaultReadObsidianBatch,
+} from './obsidian-listing.js';
+import {
   analyzeProductSchema as defaultAnalyzeProductSchema,
   createProductPreview as defaultCreateProductPreview,
 } from './schema-template.js';
@@ -47,6 +52,7 @@ async function serveStatic(rootDir, pathname, response) {
     '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
     '/similar-product-ui.js': ['similar-product-ui.js', 'text/javascript; charset=utf-8'],
     '/product-pool.js': ['product-pool.js', 'text/javascript; charset=utf-8'],
+    '/obsidian-publishing.js': ['obsidian-publishing.js', 'text/javascript; charset=utf-8'],
   };
   const entry = files[pathname];
   if (!entry) return false;
@@ -127,6 +133,9 @@ export function createServer(options = {}) {
   const createProductPreview = options.createProductPreview ?? defaultCreateProductPreview;
   const listTasks = options.listTasks ?? defaultListTasks;
   const readTask = options.readTask ?? defaultReadTask;
+  const obsidianRoot = options.obsidianRoot ?? DEFAULT_OBSIDIAN_ROOT;
+  const listObsidianBatches = options.listObsidianBatches ?? defaultListObsidianBatches;
+  const readObsidianBatch = options.readObsidianBatch ?? defaultReadObsidianBatch;
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -139,6 +148,25 @@ export function createServer(options = {}) {
 
       if (request.method === 'GET' && url.pathname === '/api/tasks') {
         sendJson(response, 200, await listTasks(rootDir));
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/obsidian/batches') {
+        sendJson(response, 200, {
+          rootAvailable: true,
+          batches: await listObsidianBatches(obsidianRoot),
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/batch') {
+        const body = await readJson(request);
+        try {
+          sendJson(response, 200, await readObsidianBatch(obsidianRoot, body.relativePath));
+        } catch (error) {
+          if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;
+          throw error;
+        }
         return;
       }
 

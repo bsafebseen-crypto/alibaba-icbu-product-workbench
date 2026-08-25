@@ -38,6 +38,12 @@
           </span>
           <span class="nav-label"><strong>自动上品</strong><small>商品素材与内容</small></span>
         </button>
+        <button class="module-link" type="button" data-module="obsidian-publishing">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM16 4v4h4M8 11h8M8 15h8"/></svg>
+          </span>
+          <span class="nav-label"><strong>Obsidian 上品</strong><small>五方案转四个类似品</small></span>
+        </button>
         <button class="module-link" type="button" data-module="keywords">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 7h10M4 12h16M4 17h12M18 5v4M16 7h4"/></svg>
@@ -270,6 +276,50 @@
             <button class="button primary" id="save-task" type="button" disabled>保存任务</button>
           </div>
         </footer>
+      </section>
+
+      <section class="module-page" id="module-obsidian-publishing" aria-labelledby="obsidian-publishing-title" hidden>
+        <header class="page-header compact-page-header">
+          <div>
+            <p class="kicker">OBSIDIAN TO ALIBABA</p>
+            <h1 id="obsidian-publishing-title">Obsidian 类似品上品</h1>
+            <p>读取固定目录中的五套 Listing，排除已经手动发布的母商品，只准备剩余四个类似品。</p>
+          </div>
+          <div class="header-status"><span>当前阶段</span><strong>只读导入</strong></div>
+        </header>
+
+        <div class="obsidian-flow" aria-label="Obsidian 上品流程">
+          <span class="active"><b>1</b><i>读取批次</i></span>
+          <span><b>2</b><i>选择母商品</i></span>
+          <span><b>3</b><i>图片与预览</i></span>
+          <span><b>4</b><i>逐个草稿</i></span>
+          <span><b>5</b><i>可信发布</i></span>
+        </div>
+
+        <section class="console-panel obsidian-panel">
+          <div class="panel-band blue"><strong>1. 选择 Obsidian 批次</strong><span>C:\obsidian\obsidian\国际站发品</span></div>
+          <div class="obsidian-controls">
+            <label><span>Markdown 文件</span><select id="obsidian-file-select"><option value="">没有读取目录</option></select></label>
+            <button class="button quiet" id="obsidian-refresh" type="button">刷新目录</button>
+            <button class="button primary blue-button" id="obsidian-load" type="button" disabled>载入并校验</button>
+          </div>
+          <p class="obsidian-status" id="obsidian-status" role="status">点击“刷新目录”读取本机 Markdown；此操作不调用阿里接口，也不消耗模型 Token。</p>
+        </section>
+
+        <section class="console-panel obsidian-panel">
+          <div class="panel-band teal"><strong>2. 指定已经发布的母商品</strong><span id="obsidian-batch-summary">尚未载入批次</span></div>
+          <div class="obsidian-source-row">
+            <label><span>阿里国际站母商品 ID</span><input id="obsidian-source-product-id" type="text" inputmode="numeric" autocomplete="off" placeholder="在这里填写你已经发布的商品 ID"></label>
+            <p>ID 只保留在当前页面状态；本阶段不会读取或修改该商品。</p>
+          </div>
+          <fieldset class="obsidian-plan-list" id="obsidian-plan-list"><legend>选择与该商品对应的方案</legend></fieldset>
+          <p class="obsidian-remaining" id="obsidian-remaining-summary">选择母商品方案后，这里会显示剩余 4 个类似品。</p>
+        </section>
+
+        <section class="console-panel obsidian-panel locked-panel" aria-disabled="true">
+          <div class="panel-band"><strong>3–5. Schema、图片、草稿和正式发布</strong><span>后续阶段</span></div>
+          <p>当前开发阶段保持锁定：先完成批次与母商品对应关系，再接入只读 Schema 预览和逐个草稿测试。</p>
+        </section>
       </section>
 
       <section class="module-page" id="module-keywords" aria-labelledby="keywords-title" hidden>

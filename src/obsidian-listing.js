@@ -1,5 +1,9 @@
+import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import path from 'node:path';
+
 const START_MARKER = '<!-- alibaba-listing-batch:start -->';
 const END_MARKER = '<!-- alibaba-listing-batch:end -->';
+const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 
 export const OBSIDIAN_LISTING_SCHEMA_VERSION = 1;
 export const DEFAULT_OBSIDIAN_ROOT = 'C:\\obsidian\\obsidian\\国际站发品';
@@ -99,4 +103,89 @@ export function validateListingBatch(payload, source = {}) {
     plans,
     source: { ...source },
   };
+}
+
+function isInsideRoot(rootDir, candidate) {
+  const relative = path.relative(rootDir, candidate);
+  return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
+}
+
+function portableRelativePath(rootDir, filePath) {
+  return path.relative(rootDir, filePath).split(path.sep).join('/');
+}
+
+async function discoverMarkdownFiles(rootDir, currentDir = rootDir) {
+  const entries = await readdir(currentDir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) continue;
+    const entryPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await discoverMarkdownFiles(rootDir, entryPath));
+    } else if (entry.isFile() && path.extname(entry.name).toLocaleLowerCase() === '.md') {
+      files.push(entryPath);
+    }
+  }
+  return files;
+}
+
+export async function listObsidianBatches(rootDir = DEFAULT_OBSIDIAN_ROOT) {
+  const resolvedRoot = path.resolve(rootDir);
+  try {
+    await stat(resolvedRoot);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+
+  const files = await discoverMarkdownFiles(resolvedRoot);
+  const results = [];
+  for (const filePath of files) {
+    const fileStat = await stat(filePath);
+    const relativePath = portableRelativePath(resolvedRoot, filePath);
+    const metadata = {
+      relativePath,
+      fileName: path.basename(filePath),
+      modifiedAt: fileStat.mtime.toISOString(),
+      size: fileStat.size,
+    };
+    try {
+      const batch = await readObsidianBatch(resolvedRoot, relativePath);
+      results.push({
+        ...metadata,
+        valid: true,
+        error: '',
+        batchId: batch.batchId,
+        batchName: batch.batchName,
+      });
+    } catch (error) {
+      results.push({ ...metadata, valid: false, error: error.message, batchId: '', batchName: '' });
+    }
+  }
+  return results.sort((left, right) => left.relativePath.localeCompare(right.relativePath, 'en'));
+}
+
+export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativePath) {
+  if (typeof relativePath !== 'string' || !relativePath.trim()) throw new Error('必须提供 Markdown 相对路径');
+  if (path.isAbsolute(relativePath)) throw new Error('必须使用相对路径');
+  if (path.extname(relativePath).toLocaleLowerCase() !== '.md') throw new Error('只允许读取 Markdown 文件');
+
+  const resolvedRoot = path.resolve(rootDir);
+  const requestedPath = path.resolve(resolvedRoot, relativePath);
+  if (!isInsideRoot(resolvedRoot, requestedPath)) throw new Error('文件必须位于 Obsidian 发品目录内');
+
+  const [realRoot, realFile] = await Promise.all([realpath(resolvedRoot), realpath(requestedPath)]);
+  if (!isInsideRoot(realRoot, realFile)) throw new Error('文件必须位于 Obsidian 发品目录内');
+
+  const fileStat = await stat(realFile);
+  if (!fileStat.isFile()) throw new Error('目标不是 Markdown 文件');
+  if (fileStat.size > MAX_MARKDOWN_BYTES) throw new Error('Markdown 文件不能超过 2 MiB');
+
+  const markdown = await readFile(realFile, 'utf8');
+  return validateListingBatch(extractListingPayload(markdown), {
+    relativePath: portableRelativePath(realRoot, realFile),
+    fileName: path.basename(realFile),
+    modifiedAt: fileStat.mtime.toISOString(),
+    size: fileStat.size,
+  });
 }

@@ -12,6 +12,7 @@ import {
   sortProductRows,
   summarizeDashboard,
 } from './product-pool.js';
+import { initObsidianPublishing } from './obsidian-publishing.js';
 
 const providerPresets = {
   openai: 'https://api.openai.com/v1',
@@ -1640,6 +1641,7 @@ elements['save-task'].addEventListener('click', async () => {
 
 restoreAiProfile();
 restoreAlibabaProfile();
+initObsidianPublishing({ requestJson });
 renderKeywords();
 renderEditor();
 loadProductPool();
