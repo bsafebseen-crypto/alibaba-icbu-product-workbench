@@ -8,6 +8,7 @@ const parser = new XMLParser({
 const builder = new XMLBuilder({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
+  suppressBooleanAttributes: false,
   suppressEmptyNode: true,
 });
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { XMLValidator } from 'fast-xml-parser';
 
 import {
   analyzeProductSchema,
@@ -324,4 +325,23 @@ test('assertOnlyMutableSchemaRolesChanged ignores parser type drift after XML re
   assert.doesNotThrow(() => (
     assertOnlyMutableSchemaRolesChanged(schemaWithBooleanRule, preview.previewXml)
   ));
+});
+
+test('createProductPreview keeps true-valued Alibaba attributes as valid XML', () => {
+  const schemaWithTrueAttribute = renderedAlibabaSchemaXml.replace(
+    '<itemSchema>',
+    '<itemSchema><field id="catId"><rules><rule name="readOnlyRule" value="true"/></rules><value>301504</value></field>',
+  );
+  const preview = createProductPreview(schemaWithTrueAttribute, {
+    title: 'New title',
+    sellingPoints: 'New summary',
+    faqItems: Array.from({ length: 5 }, (_, index) => ({
+      question: `Q${index}?`,
+      answer: `A${index}.`,
+    })),
+    customAttributes: [{ name: 'Material', value: 'Polyester' }],
+  });
+
+  assert.equal(XMLValidator.validate(preview.previewXml), true);
+  assert.match(preview.previewXml, /readOnlyRule" value="true"/);
 });
