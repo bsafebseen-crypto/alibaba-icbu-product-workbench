@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildPreviewRequest,
   createObsidianPublishingState,
   imageFileKey,
   invalidatePreviewState,
@@ -88,4 +89,27 @@ test('invalidatePreviewState clears draft authority after an image changes', () 
     { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
     { previews: [], sessionId: '', taskId: '', draftItems: {} },
   );
+});
+
+test('buildPreviewRequest preserves source product publishing context', () => {
+  const state = createObsidianPublishingState();
+  state.batch = { source: { relativePath: '2026-08-25/反光T恤4.md' } };
+  state.basePlanId = 'plan-1';
+  state.sourceContext = {
+    sourceProductId: '1601933369105',
+    categoryId: '301504',
+    language: 'en_US',
+    publishType: 'default',
+    version: '1',
+    sourceProductType: 'sourcing',
+    schemaXml: '<schema />',
+  };
+  const imagesByPlan = { 'plan-2': [{ fileId: 'file-2', url: 'https://img/2.jpg' }] };
+
+  assert.deepEqual(buildPreviewRequest(state, imagesByPlan), {
+    relativePath: '2026-08-25/反光T恤4.md',
+    basePlanId: 'plan-1',
+    sourceContext: state.sourceContext,
+    imagesByPlan,
+  });
 });

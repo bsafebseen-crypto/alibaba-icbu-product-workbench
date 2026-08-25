@@ -48,6 +48,15 @@ export function remainingPlans(batch, basePlanId) {
   return batch.plans.filter((plan) => plan.id !== basePlanId);
 }
 
+export function buildPreviewRequest(state, imagesByPlan) {
+  return {
+    relativePath: state.batch.source.relativePath,
+    basePlanId: state.basePlanId,
+    sourceContext: state.sourceContext,
+    imagesByPlan,
+  };
+}
+
 function text(element, value) {
   if (element) element.textContent = value;
 }
@@ -351,12 +360,7 @@ export function initObsidianPublishing({
       const imagesByPlan = resolveUploadedImages(state.variants, state.filesByPlan, state.uploads);
       const result = await requestJson('/api/obsidian/preview', {
         method: 'POST',
-        body: JSON.stringify({
-          relativePath: state.batch.source.relativePath,
-          basePlanId: state.basePlanId,
-          schemaXml: state.sourceContext.schemaXml,
-          imagesByPlan,
-        }),
+        body: JSON.stringify(buildPreviewRequest(state, imagesByPlan)),
       });
       state.previews = result.previews;
       state.sessionId = result.sessionId;
