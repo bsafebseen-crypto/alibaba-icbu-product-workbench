@@ -110,7 +110,11 @@ async function requestJson(url, options = {}) {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `请求失败（HTTP ${response.status}）`);
+  if (!response.ok) {
+    const error = new Error(body.error || `请求失败（HTTP ${response.status}）`);
+    Object.assign(error, body, { status: response.status });
+    throw error;
+  }
   return body;
 }
 

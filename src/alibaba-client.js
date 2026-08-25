@@ -337,4 +337,71 @@ export async function loadAlibabaProductContext(
   };
 }
 
+export async function getAlibabaPublishingCapability(
+  config,
+  { categoryId, language } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const catId = String(categoryId || '').trim();
+  const normalizedLanguage = String(language || '').trim();
+  if (!catId || !normalizedLanguage) throw new Error('发品权限检查缺少类目或语种');
+  const body = await callAlibabaApi(config, 'alibaba.icbu.product.type.available.get', {
+    cat_id: catId,
+    language: normalizedLanguage,
+  }, fetchImpl, timestamp);
+  const response = body.alibaba_icbu_product_type_available_get_response || body;
+  const result = response.result || response.data || response;
+  return {
+    supportPostSourcing: result.support_post_sourcing === true || result.support_post_sourcing === 'true',
+    supportPostWholesale: result.support_post_whole_sale === true || result.support_post_whole_sale === 'true',
+    requestId: body.request_id || response.request_id || '',
+  };
+}
+
+export async function createAlibabaProductDraft(
+  config,
+  { schemaXml, publishContext } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const xml = String(schemaXml || '').trim();
+  if (!xml) throw new Error('草稿 Schema 不能为空');
+  const categoryId = String(publishContext?.categoryId || '').trim();
+  const language = String(publishContext?.language || '').trim();
+  const publishType = String(publishContext?.publishType || '').trim();
+  const version = String(publishContext?.version || '').trim();
+  if (!categoryId || !language || !publishType) throw new Error('草稿发布上下文不完整');
+
+  const body = await callAlibabaApi(config, 'alibaba.icbu.product.schema.add.draft', {
+    param_product_top_publish_request: {
+      publish_type: publishType,
+      xml,
+      cat_id: categoryId,
+      language,
+      ...(version ? { version } : {}),
+    },
+  }, fetchImpl, timestamp);
+  const result = body.alibaba_icbu_product_schema_add_draft_response || body;
+  const bizSuccess = result.biz_success === true || result.biz_success === 'true';
+  if (!bizSuccess) {
+    const error = new Error(result.message || '阿里明确返回草稿创建失败');
+    error.code = result.msg_code || '';
+    error.traceId = result.trace_id || '';
+    error.requestId = body.request_id || result.request_id || '';
+    error.definitive = result.biz_success === false || result.biz_success === 'false';
+    throw error;
+  }
+  const productId = String(result.product_id || '').trim();
+  if (!productId) throw new Error('阿里返回草稿成功，但没有商品草稿 ID');
+  return {
+    bizSuccess: true,
+    productId,
+    message: result.message || '',
+    msgCode: result.msg_code || '',
+    traceId: result.trace_id || '',
+    requestId: body.request_id || result.request_id || '',
+  };
+}
+
 export { DEFAULT_GATEWAY };

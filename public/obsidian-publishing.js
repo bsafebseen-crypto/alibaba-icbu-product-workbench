@@ -9,6 +9,9 @@ export function createObsidianPublishingState() {
     filesByPlan: {},
     uploads: {},
     previews: [],
+    sessionId: '',
+    taskId: '',
+    draftItems: {},
     loading: false,
     error: '',
   };
@@ -29,6 +32,13 @@ export function resolveUploadedImages(variants, filesByPlan, uploads) {
     });
     return [variant.id, images];
   }));
+}
+
+export function invalidatePreviewState(state) {
+  state.previews = [];
+  state.sessionId = '';
+  state.taskId = '';
+  state.draftItems = {};
 }
 
 export function remainingPlans(batch, basePlanId) {
@@ -68,6 +78,7 @@ export function initObsidianPublishing({
     uploadImages: documentRef.getElementById('obsidian-upload-images'),
     generatePreviews: documentRef.getElementById('obsidian-generate-previews'),
     previewStatus: documentRef.getElementById('obsidian-preview-status'),
+    draftStatus: documentRef.getElementById('obsidian-draft-status'),
   };
 
   function setStatus(message, kind = '') {
@@ -85,7 +96,7 @@ export function initObsidianPublishing({
     state.variants = [];
     state.filesByPlan = {};
     state.uploads = {};
-    state.previews = [];
+    invalidatePreviewState(state);
     elements.uploadImages.disabled = true;
     elements.generatePreviews.disabled = true;
     elements.variants.innerHTML = '<p>载入母商品 Schema 后显示剩余四套方案。</p>';
@@ -172,7 +183,13 @@ export function initObsidianPublishing({
       const description = documentRef.createElement('p');
       description.textContent = variant.sellingPoints;
       content.append(summary, description);
-      card.append(heading, label, content);
+      const draftButton = documentRef.createElement('button');
+      draftButton.className = 'button obsidian-draft-button';
+      draftButton.type = 'button';
+      draftButton.dataset.planId = variant.id;
+      draftButton.textContent = '确认并创建此商品草稿';
+      draftButton.disabled = true;
+      card.append(heading, label, content, draftButton);
       elements.variants.append(card);
     }
   }
@@ -249,7 +266,7 @@ export function initObsidianPublishing({
       state.variants = remainingPlans(state.batch, state.basePlanId);
       state.filesByPlan = {};
       state.uploads = {};
-      state.previews = [];
+      invalidatePreviewState(state);
       renderVariants();
       text(
         elements.sourceStatus,
@@ -268,8 +285,13 @@ export function initObsidianPublishing({
     if (!planId || event.target.type !== 'file') return;
     const files = [...event.target.files];
     state.filesByPlan[planId] = files;
-    state.previews = [];
+    invalidatePreviewState(state);
     elements.generatePreviews.disabled = true;
+    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((draftButton) => {
+      draftButton.disabled = true;
+      draftButton.textContent = '请重新生成完整预览';
+    });
+    text(elements.draftStatus, '图片已变化，旧预览和草稿权限已失效。');
     const card = event.target.closest('.obsidian-variant-card');
     const status = card?.querySelector('.obsidian-variant-status');
     text(status, files.length === 6 ? '6 张已选择 · 待上传' : `已选择 ${files.length} 张 · 必须为 6 张`);
@@ -337,14 +359,68 @@ export function initObsidianPublishing({
         }),
       });
       state.previews = result.previews;
+      state.sessionId = result.sessionId;
+      state.taskId = result.taskId;
+      state.draftItems = Object.fromEntries(result.previews.map((preview) => [
+        preview.planId,
+        { planId: preview.planId, fingerprint: preview.fingerprint, status: 'preview_ready' },
+      ]));
       for (const preview of state.previews) {
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(preview.planId)}"]`);
         text(card?.querySelector('.obsidian-variant-status'), `完整预览通过 · ${preview.fingerprint.slice(0, 10)}`);
+        const button = card?.querySelector('.obsidian-draft-button');
+        if (button) button.disabled = false;
       }
       setPreviewStatus('四份完整预览均通过：标题、卖点、FAQ、10 条属性和 6 张图片已替换，受保护字段保持不变。', 'success');
+      text(elements.draftStatus, '草稿测试已就绪。请逐个核对方案卡，然后单独点击并确认。');
     } catch (error) {
       setPreviewStatus(error.message, 'error');
       elements.generatePreviews.disabled = false;
+    }
+  });
+  elements.variants.addEventListener('click', async (event) => {
+    const button = event.target.closest('.obsidian-draft-button');
+    if (!button) return;
+    const planId = button.dataset.planId;
+    const preview = state.previews.find((candidate) => candidate.planId === planId);
+    const variant = state.variants.find((candidate) => candidate.id === planId);
+    if (!preview || !variant || !state.sessionId) return;
+    const confirmed = windowRef.confirm(
+      `即将在阿里国际站创建 1 个商品草稿：\n\n${variant.title}\n\n母商品 ID：${state.sourceProductId}\n方案：${planId}\n\n只创建这一份草稿，不会正式发布。是否继续？`,
+    );
+    if (!confirmed) return;
+
+    button.disabled = true;
+    button.textContent = '正在创建草稿…';
+    text(elements.draftStatus, `正在提交 ${planId}；不会自动提交下一份。`);
+    try {
+      const result = await requestJson('/api/obsidian/draft', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: getAlibabaConfig(),
+          sessionId: state.sessionId,
+          planId,
+          fingerprint: preview.fingerprint,
+          confirmed: true,
+        }),
+      });
+      state.draftItems[planId] = result.item;
+      button.textContent = `草稿已创建 · ${result.item.draftProductId}`;
+      const card = button.closest('.obsidian-variant-card');
+      text(card?.querySelector('.obsidian-variant-status'), `草稿 ID ${result.item.draftProductId}`);
+      text(elements.draftStatus, `${planId} 草稿已创建。请先在阿里后台核对，再继续下一份。`);
+    } catch (error) {
+      if (error.item) state.draftItems[planId] = error.item;
+      if (error.item?.status === 'result_unknown') {
+        button.textContent = '结果未知 · 禁止重试';
+        text(elements.draftStatus, `${planId} 返回结果未知。不要重试；请先按标题和时间到阿里后台核对。`);
+      } else if (error.item?.status === 'failed') {
+        button.textContent = '阿里明确拒绝 · 查看提示';
+        text(elements.draftStatus, `${planId} 创建失败：${error.message}`);
+      } else {
+        button.textContent = '无法创建草稿';
+        text(elements.draftStatus, error.message);
+      }
     }
   });
 

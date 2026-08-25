@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   createObsidianPublishingState,
   imageFileKey,
+  invalidatePreviewState,
   remainingPlans,
   resolveUploadedImages,
 } from '../public/obsidian-publishing.js';
@@ -23,6 +24,9 @@ test('createObsidianPublishingState starts without persisted product data', () =
     filesByPlan: {},
     uploads: {},
     previews: [],
+    sessionId: '',
+    taskId: '',
+    draftItems: {},
     loading: false,
     error: '',
   });
@@ -68,5 +72,20 @@ test('resolveUploadedImages blocks incomplete selections and pending uploads', (
   assert.throws(
     () => resolveUploadedImages(variants, { 'plan-1': files }, firstFiveUploads),
     /5\.jpg 尚未上传到图片银行/,
+  );
+});
+
+test('invalidatePreviewState clears draft authority after an image changes', () => {
+  const state = createObsidianPublishingState();
+  state.previews = [{ planId: 'plan-1' }];
+  state.sessionId = 'session';
+  state.taskId = 'task';
+  state.draftItems = { 'plan-1': { status: 'preview_ready' } };
+
+  invalidatePreviewState(state);
+
+  assert.deepEqual(
+    { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
+    { previews: [], sessionId: '', taskId: '', draftItems: {} },
   );
 });

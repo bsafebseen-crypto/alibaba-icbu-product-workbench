@@ -536,6 +536,7 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
     assert.match(page, /id="obsidian-variant-list"/);
     assert.match(page, /id="obsidian-upload-images"/);
     assert.match(page, /id="obsidian-generate-previews"/);
+    assert.match(page, /id="obsidian-draft-status"/);
 
     const controller = await fetch(`${baseUrl}/obsidian-publishing.js`);
     assert.equal(controller.status, 200);
@@ -617,5 +618,116 @@ test('POST /api/obsidian/preview rejects missing image assignments before schema
   }, {
     readObsidianBatch: async () => ({ plans: [] }),
     createObsidianVariants: () => Array.from({ length: 4 }, (_, index) => ({ planId: `variant-${index + 1}` })),
+  });
+});
+
+test('POST /api/obsidian/draft requires confirmation and creates one fingerprint-bound draft', async () => {
+  let draftCalls = 0;
+  await withServer(async (baseUrl) => {
+    const previewResponse = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md',
+        basePlanId: 'base',
+        sourceContext: {
+          sourceProductId: '1601915922577',
+          sourceProductType: 'sourcing',
+          categoryId: '32905',
+          language: 'en_US',
+          publishType: 'default',
+          version: 'trade.1.1',
+          schemaXml: '<itemSchema />',
+        },
+        imagesByPlan: { 'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })) },
+      }),
+    });
+    const prepared = await previewResponse.json();
+    assert.match(prepared.sessionId, /^[0-9a-f-]{36}$/);
+    assert.match(prepared.taskId, /^[0-9a-f-]{36}$/);
+
+    const blocked = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: prepared.sessionId, planId: 'variant-1', fingerprint: 'hash-variant-1' }),
+    });
+    assert.equal(blocked.status, 400);
+    assert.equal(draftCalls, 0);
+
+    const response = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' },
+        sessionId: prepared.sessionId,
+        planId: 'variant-1',
+        fingerprint: 'hash-variant-1',
+        confirmed: true,
+      }),
+    });
+    assert.equal(response.status, 201);
+    const result = await response.json();
+    assert.equal(result.item.status, 'draft_created');
+    assert.equal(result.item.draftProductId, 'draft-variant-1');
+    assert.equal(draftCalls, 1);
+
+    const duplicate = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' }, sessionId: prepared.sessionId, planId: 'variant-1', fingerprint: 'hash-variant-1', confirmed: true,
+      }),
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(draftCalls, 1);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true, supportPostWholesale: false }),
+    createAlibabaProductDraft: async (config, input) => {
+      draftCalls += 1;
+      assert.equal(input.schemaXml, '<preview />');
+      assert.equal(input.publishContext.categoryId, '32905');
+      return { productId: 'draft-variant-1', traceId: 'trace-1', requestId: 'request-1' };
+    },
+  });
+});
+
+test('POST /api/obsidian/draft marks a timeout unknown and blocks retry', async () => {
+  let draftCalls = 0;
+  await withServer(async (baseUrl) => {
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base',
+        sourceContext: { sourceProductType: 'sourcing', categoryId: '32905', language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<itemSchema />' },
+        imagesByPlan: { 'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })) },
+      }),
+    })).json();
+    const body = {
+      config: { appKey: 'key' }, sessionId: prepared.sessionId, planId: 'variant-1', fingerprint: 'hash-variant-1', confirmed: true,
+    };
+    const response = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 502);
+    assert.equal((await response.json()).item.status, 'result_unknown');
+
+    const retry = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    assert.equal(retry.status, 409);
+    assert.equal(draftCalls, 1);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    createAlibabaProductDraft: async () => {
+      draftCalls += 1;
+      throw new Error('timeout');
+    },
   });
 });

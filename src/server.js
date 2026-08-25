@@ -1,4 +1,5 @@
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,9 @@ import {
   testAiConnection as defaultTestAiConnection,
 } from './ai-client.js';
 import {
+  createAlibabaProductDraft as defaultCreateAlibabaProductDraft,
   exchangeAlibabaCode as defaultExchangeAlibabaCode,
+  getAlibabaPublishingCapability as defaultGetAlibabaPublishingCapability,
   loadAlibabaProductContext as defaultLoadAlibabaProductContext,
   loadAlibabaProductTemplate as defaultLoadAlibabaProductTemplate,
   refreshAlibabaToken as defaultRefreshAlibabaToken,
@@ -27,6 +30,17 @@ import {
   createObsidianVariants as defaultCreateObsidianVariants,
   createStrictProductPreview as defaultCreateStrictProductPreview,
 } from './obsidian-variant.js';
+import {
+  createObsidianPublishingTask as defaultCreateObsidianPublishingTask,
+  readObsidianPublishingTask as defaultReadObsidianPublishingTask,
+  updateObsidianDraftItem as defaultUpdateObsidianDraftItem,
+} from './obsidian-task-store.js';
+import {
+  beginDraftAttempt,
+  failDraftAttempt,
+  finishDraftAttempt,
+  markDraftResultUnknown,
+} from './publishing-state.js';
 import {
   analyzeProductSchema as defaultAnalyzeProductSchema,
   createProductPreview as defaultCreateProductPreview,
@@ -144,6 +158,12 @@ export function createServer(options = {}) {
   const readObsidianBatch = options.readObsidianBatch ?? defaultReadObsidianBatch;
   const createObsidianVariants = options.createObsidianVariants ?? defaultCreateObsidianVariants;
   const createStrictProductPreview = options.createStrictProductPreview ?? defaultCreateStrictProductPreview;
+  const createAlibabaProductDraft = options.createAlibabaProductDraft ?? defaultCreateAlibabaProductDraft;
+  const getAlibabaPublishingCapability = options.getAlibabaPublishingCapability ?? defaultGetAlibabaPublishingCapability;
+  const createObsidianPublishingTask = options.createObsidianPublishingTask ?? defaultCreateObsidianPublishingTask;
+  const readObsidianPublishingTask = options.readObsidianPublishingTask ?? defaultReadObsidianPublishingTask;
+  const updateObsidianDraftItem = options.updateObsidianDraftItem ?? defaultUpdateObsidianDraftItem;
+  const previewSessions = new Map();
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -193,6 +213,7 @@ export function createServer(options = {}) {
         try {
           const batch = await readObsidianBatch(obsidianRoot, body.relativePath);
           const variants = createObsidianVariants(batch, body.basePlanId);
+          const schemaXml = body.sourceContext?.schemaXml || body.schemaXml;
           const previews = variants.map((variant) => {
             const alibabaImages = body.imagesByPlan?.[variant.planId];
             if (!Array.isArray(alibabaImages) || alibabaImages.length !== 6) {
@@ -200,13 +221,107 @@ export function createServer(options = {}) {
             }
             return {
               planId: variant.planId,
-              ...createStrictProductPreview(body.schemaXml, { ...variant, alibabaImages }),
+              ...createStrictProductPreview(schemaXml, { ...variant, alibabaImages }),
             };
           });
-          sendJson(response, 200, { previews });
+          const sessionId = crypto.randomUUID();
+          const context = {
+            categoryId: body.sourceContext?.categoryId,
+            language: body.sourceContext?.language,
+            publishType: body.sourceContext?.publishType,
+            version: body.sourceContext?.version,
+            sourceProductType: body.sourceContext?.sourceProductType,
+          };
+          const task = await createObsidianPublishingTask(rootDir, {
+            batchId: batch.batchId,
+            relativePath: body.relativePath,
+            basePlanId: body.basePlanId,
+            sourceProductId: body.sourceContext?.sourceProductId,
+            context,
+            items: previews.map((preview) => ({
+              planId: preview.planId,
+              fingerprint: preview.fingerprint,
+              status: 'preview_ready',
+            })),
+          });
+          previewSessions.set(sessionId, {
+            taskId: task.id,
+            context,
+            previews: new Map(previews.map((preview) => [preview.planId, {
+              previewXml: preview.previewXml,
+              fingerprint: preview.fingerprint,
+            }])),
+          });
+          sendJson(response, 200, {
+            previews,
+            sessionId,
+            taskId: task.id,
+            taskVersion: task.version,
+          });
         } catch (error) {
           if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;
           throw error;
+        }
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/draft') {
+        const body = await readJson(request);
+        if (body.confirmed !== true) {
+          throw Object.assign(new Error('创建草稿前必须逐商品明确确认'), { status: 400 });
+        }
+        const session = previewSessions.get(String(body.sessionId || ''));
+        if (!session) throw Object.assign(new Error('预览会话已失效，请重新生成完整预览'), { status: 409 });
+        const preview = session.previews.get(String(body.planId || ''));
+        if (!preview) throw Object.assign(new Error('预览会话中不存在这个方案'), { status: 400 });
+
+        let task = await readObsidianPublishingTask(rootDir, session.taskId);
+        const item = task.items.find((candidate) => candidate.planId === body.planId);
+        if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+        if (item.status !== 'preview_ready') {
+          throw Object.assign(new Error('当前状态不允许再次创建草稿'), { status: 409 });
+        }
+        if (body.fingerprint !== preview.fingerprint || item.fingerprint !== preview.fingerprint) {
+          throw Object.assign(new Error('预览已经变化，请重新生成并确认'), { status: 409 });
+        }
+
+        const capability = await getAlibabaPublishingCapability(body.config, {
+          categoryId: session.context.categoryId,
+          language: session.context.language,
+        });
+        const sourceType = String(session.context.sourceProductType || '').toLocaleLowerCase();
+        const allowed = sourceType === 'sourcing'
+          ? capability.supportPostSourcing
+          : capability.supportPostWholesale;
+        if (!allowed) throw Object.assign(new Error('当前账号没有这个类目和商品类型的发品权限'), { status: 403 });
+
+        const submitting = beginDraftAttempt(item, body.fingerprint, new Date().toISOString());
+        task = await updateObsidianDraftItem(
+          rootDir, session.taskId, body.planId, submitting, task.version,
+        );
+        try {
+          const result = await createAlibabaProductDraft(body.config, {
+            schemaXml: preview.previewXml,
+            publishContext: session.context,
+          });
+          const completed = finishDraftAttempt(submitting, result, new Date().toISOString());
+          task = await updateObsidianDraftItem(
+            rootDir, session.taskId, body.planId, completed, task.version,
+          );
+          sendJson(response, 201, { taskId: task.id, taskVersion: task.version, item: completed });
+        } catch (error) {
+          const completed = error.definitive === true
+            ? failDraftAttempt(submitting, error, new Date().toISOString())
+            : markDraftResultUnknown(submitting, error, new Date().toISOString());
+          task = await updateObsidianDraftItem(
+            rootDir, session.taskId, body.planId, completed, task.version,
+          );
+          sendJson(response, error.definitive === true ? 422 : 502, {
+            error: completed.errorMessage,
+            taskId: task.id,
+            taskVersion: task.version,
+            item: completed,
+          });
         }
         return;
       }

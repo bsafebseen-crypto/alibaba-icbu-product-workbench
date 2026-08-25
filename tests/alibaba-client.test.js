@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 import {
   callAlibabaApi,
+  createAlibabaProductDraft,
   exchangeAlibabaCode,
+  getAlibabaPublishingCapability,
   loadAlibabaProductContext,
   loadAlibabaProductTemplate,
   refreshAlibabaToken,
@@ -289,6 +291,104 @@ test('loadAlibabaProductContext blocks when product details omit the category', 
       accessToken: 'token',
     }, { productId: '1601915922577' }, fetchImpl, 1700000000000),
     /无法从源商品确定类目 ID/,
+  );
+});
+
+test('getAlibabaPublishingCapability reads source and wholesale permissions', async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: '0',
+          request_id: 'capability-request',
+          alibaba_icbu_product_type_available_get_response: {
+            result: { support_post_sourcing: true, support_post_whole_sale: false },
+          },
+        };
+      },
+    };
+  };
+
+  const result = await getAlibabaPublishingCapability({
+    gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+  }, { categoryId: '32905', language: 'en_US' }, fetchImpl, 1700000000000);
+
+  assert.equal(request.url, 'https://gateway.example.com/sync?method=alibaba.icbu.product.type.available.get');
+  assert.equal(request.body.cat_id, '32905');
+  assert.equal(request.body.language, 'en_US');
+  assert.deepEqual(result, {
+    supportPostSourcing: true,
+    supportPostWholesale: false,
+    requestId: 'capability-request',
+  });
+});
+
+test('createAlibabaProductDraft sends the official schema draft envelope', async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          code: '0',
+          request_id: 'draft-request',
+          alibaba_icbu_product_schema_add_draft_response: {
+            biz_success: true,
+            product_id: '987654321',
+            trace_id: 'draft-trace',
+            message: '',
+            msg_code: '',
+          },
+        };
+      },
+    };
+  };
+
+  const result = await createAlibabaProductDraft({
+    gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+  }, {
+    schemaXml: '<itemSchema />',
+    publishContext: { categoryId: '32905', language: 'en_US', publishType: 'default', version: 'trade.1.1' },
+  }, fetchImpl, 1700000000000);
+
+  assert.equal(request.url, 'https://gateway.example.com/sync?method=alibaba.icbu.product.schema.add.draft');
+  assert.deepEqual(JSON.parse(request.body.param_product_top_publish_request), {
+    publish_type: 'default',
+    xml: '<itemSchema />',
+    cat_id: '32905',
+    language: 'en_US',
+    version: 'trade.1.1',
+  });
+  assert.deepEqual(result, {
+    bizSuccess: true,
+    productId: '987654321',
+    message: '',
+    msgCode: '',
+    traceId: 'draft-trace',
+    requestId: 'draft-request',
+  });
+});
+
+test('createAlibabaProductDraft marks explicit Alibaba business failures as definitive', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    async json() { return { biz_success: false, msg_code: 'INVALID', message: 'bad field', trace_id: 'trace' }; },
+  });
+  await assert.rejects(
+    () => createAlibabaProductDraft({
+      gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+    }, {
+      schemaXml: '<itemSchema />',
+      publishContext: { categoryId: '32905', language: 'en_US', publishType: 'default', version: 'trade.1.1' },
+    }, fetchImpl, 1700000000000),
+    (error) => error.code === 'INVALID' && error.definitive === true && error.traceId === 'trace',
   );
 });
 
