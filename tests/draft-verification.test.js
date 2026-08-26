@@ -51,3 +51,38 @@ test('compareDraftToPlan reports field differences without returning raw XML', (
   });
   assert.equal(JSON.stringify(result).includes('schemaXml'), false);
 });
+
+test('compareDraftToPlan identifies reordered, missing, unexpected, and changed attributes', () => {
+  const analysis = matchingAnalysis();
+  const actual = analysis.recognized.customAttributes.items;
+  [actual[0], actual[1]] = [actual[1], actual[0]];
+  actual[2].value = 'Changed value';
+  actual.splice(3, 1);
+  actual.push({ name: 'Extra', value: 'Extra value' });
+
+  const result = compareDraftToPlan(plan, analysis);
+
+  assert.equal(result.fields.customAttributes.match, false);
+  assert.deepEqual(result.fields.customAttributes.details, {
+    orderMatch: false,
+    missing: [{ name: 'Attribute 4', value: 'Value 4' }],
+    unexpected: [{ name: 'Extra', value: 'Extra value' }],
+    changed: [{ name: 'Attribute 3', expectedValue: 'Value 3', actualValue: 'Changed value' }],
+  });
+});
+
+test('compareDraftToPlan treats attribute order-only changes as matching content', () => {
+  const analysis = matchingAnalysis();
+  analysis.recognized.customAttributes.items.reverse();
+
+  const result = compareDraftToPlan(plan, analysis);
+
+  assert.equal(result.exactMatch, true);
+  assert.deepEqual(result.differences, []);
+  assert.deepEqual(result.fields.customAttributes, {
+    match: true,
+    expectedCount: 10,
+    actualCount: 10,
+    orderChanged: true,
+  });
+});

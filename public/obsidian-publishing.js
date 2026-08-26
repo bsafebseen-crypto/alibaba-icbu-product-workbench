@@ -52,13 +52,26 @@ export function remainingPlans(batch, basePlanId) {
 export function formatDraftVerification(result = {}) {
   const trace = result.traceId ? `追踪号 ${result.traceId}` : '无追踪号';
   if (result.comparison?.exactMatch) {
-    return `核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。${trace}`;
+    const orderNote = result.comparison?.fields?.customAttributes?.orderChanged
+      ? '阿里调整了属性顺序，名称和值一致。'
+      : '';
+    return `核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。${orderNote}${trace}`;
   }
   const labels = {
     title: '标题', sellingPoints: '卖点', faqs: 'FAQ', customAttributes: '属性', images: '图片',
   };
   const differences = (result.comparison?.differences || []).map((name) => labels[name] || name);
-  return `发现差异：${differences.join('、') || '无法识别字段'}。${trace}`;
+  const attributeDetails = result.comparison?.fields?.customAttributes?.details;
+  const attributeMessages = attributeDetails ? [
+    ...(!attributeDetails.orderMatch ? ['顺序不同'] : []),
+    ...(attributeDetails.changed || []).map((item) => (
+      `${item.name}：期望“${item.expectedValue}”，草稿“${item.actualValue}”`
+    )),
+    ...(attributeDetails.missing || []).map((item) => `缺少 ${item.name}=${item.value}`),
+    ...(attributeDetails.unexpected || []).map((item) => `多出 ${item.name}=${item.value}`),
+  ] : [];
+  const detail = attributeMessages.length ? `属性明细：${attributeMessages.join('；')}。` : '';
+  return `发现差异：${differences.join('、') || '无法识别字段'}。${detail}${trace}`;
 }
 
 export function buildPreviewRequest(state, imagesByPlan) {

@@ -100,9 +100,36 @@ test('formatDraftVerification summarizes successful and mismatched read-only che
   }), '核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。追踪号 trace-1');
 
   assert.equal(formatDraftVerification({
+    traceId: 'trace-order',
+    comparison: {
+      exactMatch: true,
+      fields: { customAttributes: { match: true, orderChanged: true } },
+      differences: [],
+    },
+  }), '核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。阿里调整了属性顺序，名称和值一致。追踪号 trace-order');
+
+  assert.equal(formatDraftVerification({
     traceId: 'trace-2',
     comparison: { exactMatch: false, differences: ['title', 'faqs', 'images'] },
   }), '发现差异：标题、FAQ、图片。追踪号 trace-2');
+
+  assert.equal(formatDraftVerification({
+    traceId: 'trace-3',
+    comparison: {
+      exactMatch: false,
+      differences: ['customAttributes'],
+      fields: {
+        customAttributes: {
+          details: {
+            orderMatch: false,
+            missing: [{ name: 'Attribute 4', value: 'Value 4' }],
+            unexpected: [{ name: 'Extra', value: 'Extra value' }],
+            changed: [{ name: 'Attribute 3', expectedValue: 'Value 3', actualValue: 'Changed value' }],
+          },
+        },
+      },
+    },
+  }), '发现差异：属性。属性明细：顺序不同；Attribute 3：期望“Value 3”，草稿“Changed value”；缺少 Attribute 4=Value 4；多出 Extra=Extra value。追踪号 trace-3');
 });
 
 test('buildPreviewRequest preserves source product publishing context', () => {

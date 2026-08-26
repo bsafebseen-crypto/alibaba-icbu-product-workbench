@@ -2,6 +2,33 @@ function equal(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function attributeDifferenceDetails(expected, actual) {
+  const expectedByName = new Map(expected.map((item) => [String(item?.name || ''), item]));
+  const actualByName = new Map(actual.map((item) => [String(item?.name || ''), item]));
+  return {
+    orderMatch: equal(
+      expected.map((item) => String(item?.name || '')),
+      actual.map((item) => String(item?.name || '')),
+    ),
+    missing: expected
+      .filter((item) => !actualByName.has(String(item?.name || '')))
+      .map((item) => ({ name: String(item.name || ''), value: String(item.value || '') })),
+    unexpected: actual
+      .filter((item) => !expectedByName.has(String(item?.name || '')))
+      .map((item) => ({ name: String(item.name || ''), value: String(item.value || '') })),
+    changed: expected.flatMap((item) => {
+      const name = String(item?.name || '');
+      const actualItem = actualByName.get(name);
+      if (!actualItem || String(actualItem.value || '') === String(item.value || '')) return [];
+      return [{
+        name,
+        expectedValue: String(item.value || ''),
+        actualValue: String(actualItem.value || ''),
+      }];
+    }),
+  };
+}
+
 export function compareDraftToPlan(plan = {}, analysis = {}) {
   const recognized = analysis.recognized || {};
   const expectedFaqs = Array.isArray(plan.faqs) ? plan.faqs : [];
@@ -14,6 +41,19 @@ export function compareDraftToPlan(plan = {}, analysis = {}) {
   const completeImageMetadata = images.every((image) => (
     String(image?.fileId || '').trim() && String(image?.url || '').trim()
   ));
+  const attributeDetails = attributeDifferenceDetails(expectedAttributes, actualAttributes);
+  const customAttributesMatch = expectedAttributes.length === 10
+    && actualAttributes.length === 10
+    && attributeDetails.missing.length === 0
+    && attributeDetails.unexpected.length === 0
+    && attributeDetails.changed.length === 0;
+  const customAttributesResult = {
+    match: customAttributesMatch,
+    expectedCount: expectedAttributes.length,
+    actualCount: actualAttributes.length,
+    ...(customAttributesMatch && !attributeDetails.orderMatch ? { orderChanged: true } : {}),
+    ...(!customAttributesMatch ? { details: attributeDetails } : {}),
+  };
   const fields = {
     title: {
       match: String(recognized.title?.value || '') === String(plan.title || ''),
@@ -30,11 +70,7 @@ export function compareDraftToPlan(plan = {}, analysis = {}) {
       expectedCount: expectedFaqs.length,
       actualCount: actualFaqs.length,
     },
-    customAttributes: {
-      match: expectedAttributes.length === 10 && equal(actualAttributes, expectedAttributes),
-      expectedCount: expectedAttributes.length,
-      actualCount: actualAttributes.length,
-    },
+    customAttributes: customAttributesResult,
     images: {
       match: images.length === 6 && completeImageMetadata,
       expectedCount: 6,
