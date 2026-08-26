@@ -537,6 +537,7 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
     assert.match(page, /id="obsidian-upload-images"/);
     assert.match(page, /id="obsidian-generate-previews"/);
     assert.match(page, /id="obsidian-draft-status"/);
+    assert.match(page, /id="obsidian-saved-drafts"/);
 
     const controller = await fetch(`${baseUrl}/obsidian-publishing.js`);
     assert.equal(controller.status, 200);
@@ -728,6 +729,103 @@ test('POST /api/obsidian/draft marks a timeout unknown and blocks retry', async 
     createAlibabaProductDraft: async () => {
       draftCalls += 1;
       throw new Error('timeout');
+    },
+  });
+});
+
+test('GET /api/obsidian/drafts returns persisted safe draft records', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/drafts`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      drafts: [{
+        taskId: 'task-1', batchId: 'batch-1', relativePath: 'batch.md', planId: 'plan-2',
+        draftProductId: '1601933441594', completedAt: '2026-08-25T10:00:00.000Z',
+      }],
+    });
+  }, {
+    listObsidianDrafts: async () => [{
+      taskId: 'task-1', batchId: 'batch-1', relativePath: 'batch.md', planId: 'plan-2',
+      draftProductId: '1601933441594', completedAt: '2026-08-25T10:00:00.000Z',
+    }],
+  });
+});
+
+test('POST /api/obsidian/draft/verify reads one persisted draft and returns safe comparison only', async () => {
+  let received;
+  const faqs = Array.from({ length: 5 }, (_, index) => ({ question: `Q${index + 1}?`, answer: `A${index + 1}.` }));
+  const customAttributes = Array.from({ length: 10 }, (_, index) => ({ name: `Name ${index + 1}`, value: `Value ${index + 1}` }));
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/draft/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appKey: 'key', appSecret: 'must-not-leak' }, taskId: 'task-1', planId: 'plan-2' }),
+    });
+    assert.equal(response.status, 200);
+    const text = await response.text();
+    assert.equal(text.includes('must-not-leak'), false);
+    assert.equal(text.includes('<itemSchema'), false);
+    assert.deepEqual(JSON.parse(text), {
+      taskId: 'task-1',
+      planId: 'plan-2',
+      draftProductId: '1601933441594',
+      traceId: 'trace-1',
+      comparison: {
+        exactMatch: true,
+        fields: {
+          title: { match: true, expected: 'Expected title', actual: 'Expected title' },
+          sellingPoints: { match: true, expected: 'Expected selling points', actual: 'Expected selling points' },
+          faqs: { match: true, expectedCount: 5, actualCount: 5 },
+          customAttributes: { match: true, expectedCount: 10, actualCount: 10 },
+          images: { match: true, expectedCount: 6, actualCount: 6, completeMetadata: true },
+        },
+        differences: [],
+      },
+    });
+    assert.deepEqual(received, {
+      config: { appKey: 'key', appSecret: 'must-not-leak' },
+      input: { productId: '1601933441594', categoryId: '301504', language: 'en_US' },
+    });
+  }, {
+    readObsidianPublishingTask: async () => ({
+      id: 'task-1', relativePath: 'batch.md', context: { categoryId: '301504', language: 'en_US' },
+      items: [{ planId: 'plan-2', status: 'draft_created', draftProductId: '1601933441594' }],
+    }),
+    readObsidianBatch: async () => ({ plans: [{ id: 'plan-2', title: 'Expected title', sellingPoints: 'Expected selling points', faqs, customAttributes }] }),
+    loadAlibabaProductDraft: async (config, input) => {
+      received = { config, input };
+      return { schemaXml: '<itemSchema />', traceId: 'trace-1' };
+    },
+    analyzeProductSchema: () => ({
+      recognized: {
+        title: { value: 'Expected title' },
+        productSummary: { value: 'Expected selling points' },
+        faq: { items: faqs },
+        customAttributes: { items: customAttributes },
+        images: { items: Array.from({ length: 6 }, (_, index) => ({ fileId: `file-${index}`, url: `https://img/${index}.jpg` })) },
+      },
+    }),
+  });
+});
+
+test('POST /api/obsidian/draft/verify returns Alibaba trace id without raw response data', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/draft/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appKey: 'key' }, taskId: 'task-1', planId: 'plan-2' }),
+    });
+    assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), {
+      error: 'draft not found', code: 'NOT_FOUND', traceId: 'trace-missing',
+    });
+  }, {
+    readObsidianPublishingTask: async () => ({
+      id: 'task-1', relativePath: 'batch.md', context: { categoryId: '301504', language: 'en_US' },
+      items: [{ planId: 'plan-2', status: 'draft_created', draftProductId: '1601933441594' }],
+    }),
+    readObsidianBatch: async () => ({ plans: [{ id: 'plan-2' }] }),
+    loadAlibabaProductDraft: async () => {
+      throw Object.assign(new Error('draft not found'), { code: 'NOT_FOUND', traceId: 'trace-missing' });
     },
   });
 });

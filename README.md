@@ -126,6 +126,8 @@ Obsidian 模块的逐份草稿使用 `alibaba.icbu.product.schema.add.draft`；�
 
 提交前工作台先把 `submitting` 状态写入本地安全任务文件。阿里明确拒绝时记录失败；网络超时、响应损坏或结果不明确时记录 `result_unknown` 并永久禁用该次重试，必须先到阿里后台按标题与时间核对。当前没有商品更新、上下架或正式发布调用。
 
+已创建草稿会保留安全的本地任务记录。工作台重启后可点击“读取并核对草稿”，只读调用 `alibaba.icbu.product.schema.render.draft`，逐项核对标题、卖点、前 5 条 FAQ、10 条自定义属性，并检查 6 张图片的图片银行标识和地址是否完整。核对结果不包含原始 XML、密钥或 Token，也不会修改、重建或发布商品。
+
 ### Obsidian 五方案导入
 
 “Obsidian 上品”模块只扫描固定目录 `C:\obsidian\obsidian\国际站发品` 下的 Markdown 文件，不监听目录，也不会自动启动任务。每个可导入文件必须恰好包含一个版本化机器数据块：

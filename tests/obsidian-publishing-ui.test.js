@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildPreviewRequest,
   createObsidianPublishingState,
+  formatDraftVerification,
   imageFileKey,
   invalidatePreviewState,
   remainingPlans,
@@ -28,6 +29,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     sessionId: '',
     taskId: '',
     draftItems: {},
+    savedDrafts: [],
     loading: false,
     error: '',
   });
@@ -89,6 +91,18 @@ test('invalidatePreviewState clears draft authority after an image changes', () 
     { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
     { previews: [], sessionId: '', taskId: '', draftItems: {} },
   );
+});
+
+test('formatDraftVerification summarizes successful and mismatched read-only checks', () => {
+  assert.equal(formatDraftVerification({
+    traceId: 'trace-1',
+    comparison: { exactMatch: true, differences: [] },
+  }), '核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。追踪号 trace-1');
+
+  assert.equal(formatDraftVerification({
+    traceId: 'trace-2',
+    comparison: { exactMatch: false, differences: ['title', 'faqs', 'images'] },
+  }), '发现差异：标题、FAQ、图片。追踪号 trace-2');
 });
 
 test('buildPreviewRequest preserves source product publishing context', () => {

@@ -374,6 +374,42 @@ export async function getAlibabaPublishingCapability(
   };
 }
 
+export async function loadAlibabaProductDraft(
+  config,
+  { productId, categoryId, language } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const normalizedProductId = String(productId || '').trim();
+  const normalizedCategoryId = String(categoryId || '').trim();
+  const normalizedLanguage = String(language || '').trim();
+  if (!/^\d+$/.test(normalizedProductId)) throw new Error('草稿商品 ID 必须是数字');
+  if (!normalizedCategoryId || !normalizedLanguage) throw new Error('读取草稿缺少类目或语种');
+
+  const body = await callAlibabaApi(config, 'alibaba.icbu.product.schema.render.draft', {
+    param_product_top_publish_request: {
+      product_id: normalizedProductId,
+      cat_id: normalizedCategoryId,
+      language: normalizedLanguage,
+    },
+  }, fetchImpl, timestamp);
+  const result = body.alibaba_icbu_product_schema_render_draft_response || body;
+  if (result.biz_success !== true && result.biz_success !== 'true') {
+    const error = new Error(result.message || '阿里未能读取这个商品草稿');
+    error.code = result.msg_code || '';
+    error.traceId = result.trace_id || '';
+    error.requestId = body.request_id || result.request_id || '';
+    throw error;
+  }
+  if (!result.data) throw new Error('阿里已返回成功，但商品草稿内容为空');
+  return {
+    productId: normalizedProductId,
+    schemaXml: result.data,
+    traceId: result.trace_id || '',
+    requestId: body.request_id || result.request_id || '',
+  };
+}
+
 export async function createAlibabaProductDraft(
   config,
   { schemaXml, publishContext } = {},

@@ -477,6 +477,15 @@ body::before { display: none; }
 .obsidian-preview-actions p[data-kind="success"] { color: #19725a; }
 .obsidian-preview-actions p[data-kind="error"] { color: #a73f32; }
 .obsidian-draft-status { margin: 0; padding: 18px; color: var(--muted); font-size: 10px; }
+.obsidian-saved-drafts { display: grid; gap: 8px; padding: 0 18px 18px; }
+.obsidian-saved-drafts > p { margin: 0; color: var(--muted); font-size: 9px; }
+.obsidian-saved-draft { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfe; }
+.obsidian-saved-draft strong, .obsidian-saved-draft small { display: block; }
+.obsidian-saved-draft strong { font-size: 10px; }
+.obsidian-saved-draft small { margin-top: 4px; color: var(--muted); font-size: 8px; }
+.obsidian-draft-verify-result { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 9px; }
+.obsidian-draft-verify-result[data-kind="success"] { color: #19725a; }
+.obsidian-draft-verify-result[data-kind="error"] { color: #a73f32; }
 
 @media (min-width: 761px) {
   body:has(.rail:hover) .app, body:has(.rail:focus-within) .app { margin-left: var(--rail-open); }

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 function requireTaskId(id) {
@@ -72,6 +72,31 @@ export async function readObsidianPublishingTask(rootDir, id) {
     if (error?.code === 'ENOENT') throw Object.assign(new Error('Obsidian 上品任务不存在'), { status: 404 });
     throw error;
   }
+}
+
+export async function listObsidianDrafts(rootDir) {
+  const directory = path.join(path.resolve(rootDir), 'data', 'tasks');
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  const tasks = await Promise.all(names
+    .filter((name) => /^obsidian-[A-Za-z0-9_-]+\.json$/.test(name))
+    .map(async (name) => JSON.parse(await readFile(path.join(directory, name), 'utf8'))));
+  return tasks.flatMap((task) => (Array.isArray(task.items) ? task.items : [])
+    .filter((item) => item.status === 'draft_created' && item.draftProductId)
+    .map((item) => ({
+      taskId: String(task.id || ''),
+      batchId: String(task.batchId || ''),
+      relativePath: String(task.relativePath || ''),
+      planId: String(item.planId || ''),
+      draftProductId: String(item.draftProductId),
+      completedAt: String(item.completedAt || ''),
+    })))
+    .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
 }
 
 export async function updateObsidianDraftItem(rootDir, id, planId, nextItem, expectedVersion) {

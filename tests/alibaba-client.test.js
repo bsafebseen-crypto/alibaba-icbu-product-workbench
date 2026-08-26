@@ -6,6 +6,7 @@ import {
   createAlibabaProductDraft,
   exchangeAlibabaCode,
   getAlibabaPublishingCapability,
+  loadAlibabaProductDraft,
   loadAlibabaProductContext,
   loadAlibabaProductTemplate,
   refreshAlibabaToken,
@@ -511,4 +512,72 @@ test('uploadAlibabaPhoto rejects empty or unsupported image data before calling 
     /图片内容为空/,
   );
   assert.equal(calls, 0);
+});
+
+test('loadAlibabaProductDraft sends the official read-only draft render envelope', async () => {
+  let request;
+  const fetchImpl = async (url, options) => {
+    request = { url, body: JSON.parse(options.body) };
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          request_id: 'request-1',
+          alibaba_icbu_product_schema_render_draft_response: {
+            biz_success: true,
+            data: '<itemSchema />',
+            trace_id: 'trace-1',
+          },
+        };
+      },
+    };
+  };
+
+  const result = await loadAlibabaProductDraft({
+    gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+  }, {
+    productId: '1601933441594', categoryId: '301504', language: 'en_US',
+  }, fetchImpl, 1700000000000);
+
+  assert.equal(request.url, 'https://gateway.example.com/sync?method=alibaba.icbu.product.schema.render.draft');
+  assert.deepEqual(JSON.parse(request.body.param_product_top_publish_request), {
+    product_id: '1601933441594',
+    cat_id: '301504',
+    language: 'en_US',
+  });
+  assert.deepEqual(result, {
+    productId: '1601933441594',
+    schemaXml: '<itemSchema />',
+    traceId: 'trace-1',
+    requestId: 'request-1',
+  });
+});
+
+test('loadAlibabaProductDraft preserves safe Alibaba failure metadata', async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        alibaba_icbu_product_schema_render_draft_response: {
+          biz_success: false,
+          message: 'draft not found',
+          msg_code: 'NOT_FOUND',
+          trace_id: 'trace-missing',
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => loadAlibabaProductDraft({
+      gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+    }, {
+      productId: '1601933441594', categoryId: '301504', language: 'en_US',
+    }, fetchImpl, 1700000000000),
+    (error) => error.message === 'draft not found'
+      && error.code === 'NOT_FOUND'
+      && error.traceId === 'trace-missing',
+  );
 });

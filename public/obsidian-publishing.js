@@ -12,6 +12,7 @@ export function createObsidianPublishingState() {
     sessionId: '',
     taskId: '',
     draftItems: {},
+    savedDrafts: [],
     loading: false,
     error: '',
   };
@@ -46,6 +47,18 @@ export function remainingPlans(batch, basePlanId) {
     throw new Error('请选择批次中的一个母商品方案');
   }
   return batch.plans.filter((plan) => plan.id !== basePlanId);
+}
+
+export function formatDraftVerification(result = {}) {
+  const trace = result.traceId ? `追踪号 ${result.traceId}` : '无追踪号';
+  if (result.comparison?.exactMatch) {
+    return `核对一致：标题、卖点、5 条 FAQ、10 条属性和 6 张图片信息均完整。${trace}`;
+  }
+  const labels = {
+    title: '标题', sellingPoints: '卖点', faqs: 'FAQ', customAttributes: '属性', images: '图片',
+  };
+  const differences = (result.comparison?.differences || []).map((name) => labels[name] || name);
+  return `发现差异：${differences.join('、') || '无法识别字段'}。${trace}`;
 }
 
 export function buildPreviewRequest(state, imagesByPlan) {
@@ -88,6 +101,7 @@ export function initObsidianPublishing({
     generatePreviews: documentRef.getElementById('obsidian-generate-previews'),
     previewStatus: documentRef.getElementById('obsidian-preview-status'),
     draftStatus: documentRef.getElementById('obsidian-draft-status'),
+    savedDrafts: documentRef.getElementById('obsidian-saved-drafts'),
   };
 
   function setStatus(message, kind = '') {
@@ -128,6 +142,49 @@ export function initObsidianPublishing({
       elements.select.append(option);
     }
     elements.load.disabled = true;
+  }
+
+  function renderSavedDrafts() {
+    elements.savedDrafts.replaceChildren();
+    if (!state.savedDrafts.length) {
+      const empty = documentRef.createElement('p');
+      empty.textContent = '本机还没有已创建的商品草稿。';
+      elements.savedDrafts.append(empty);
+      return;
+    }
+    for (const draft of state.savedDrafts) {
+      const row = documentRef.createElement('article');
+      row.className = 'obsidian-saved-draft';
+      const copy = documentRef.createElement('div');
+      const title = documentRef.createElement('strong');
+      title.textContent = `${draft.planId} · 草稿 ID ${draft.draftProductId}`;
+      const detail = documentRef.createElement('small');
+      detail.textContent = draft.relativePath;
+      copy.append(title, detail);
+      const button = documentRef.createElement('button');
+      button.className = 'button quiet obsidian-draft-verify-button';
+      button.type = 'button';
+      button.dataset.taskId = draft.taskId;
+      button.dataset.planId = draft.planId;
+      button.textContent = '读取并核对草稿';
+      const result = documentRef.createElement('p');
+      result.className = 'obsidian-draft-verify-result';
+      result.setAttribute('role', 'status');
+      row.append(copy, button, result);
+      elements.savedDrafts.append(row);
+    }
+  }
+
+  async function refreshSavedDrafts() {
+    try {
+      const result = await requestJson('/api/obsidian/drafts');
+      state.savedDrafts = result.drafts || [];
+      renderSavedDrafts();
+    } catch (error) {
+      const message = documentRef.createElement('p');
+      message.textContent = error.message;
+      elements.savedDrafts.replaceChildren(message);
+    }
   }
 
   function renderPlans() {
@@ -211,6 +268,7 @@ export function initObsidianPublishing({
       const result = await requestJson('/api/obsidian/batches');
       state.batches = result.batches;
       renderBatchList();
+      await refreshSavedDrafts();
       setStatus(`已找到 ${state.batches.length} 个 Markdown 文件。`, 'success');
     } catch (error) {
       state.error = error.message;
@@ -413,6 +471,7 @@ export function initObsidianPublishing({
       const card = button.closest('.obsidian-variant-card');
       text(card?.querySelector('.obsidian-variant-status'), `草稿 ID ${result.item.draftProductId}`);
       text(elements.draftStatus, `${planId} 草稿已创建。请先在阿里后台核对，再继续下一份。`);
+      await refreshSavedDrafts();
     } catch (error) {
       if (error.item) state.draftItems[planId] = error.item;
       if (error.item?.status === 'result_unknown') {
@@ -428,8 +487,38 @@ export function initObsidianPublishing({
     }
   });
 
+  elements.savedDrafts.addEventListener('click', async (event) => {
+    const button = event.target.closest('.obsidian-draft-verify-button');
+    if (!button) return;
+    const resultElement = button.closest('.obsidian-saved-draft')
+      ?.querySelector('.obsidian-draft-verify-result');
+    button.disabled = true;
+    button.textContent = '正在只读核对…';
+    text(resultElement, '正在读取阿里草稿，不会修改商品。');
+    try {
+      const result = await requestJson('/api/obsidian/draft/verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: getAlibabaConfig(),
+          taskId: button.dataset.taskId,
+          planId: button.dataset.planId,
+        }),
+      });
+      text(resultElement, formatDraftVerification(result));
+      resultElement.dataset.kind = result.comparison.exactMatch ? 'success' : 'error';
+    } catch (error) {
+      const trace = error.traceId ? `；追踪号 ${error.traceId}` : '';
+      text(resultElement, `读取失败：${error.message}${trace}`);
+      resultElement.dataset.kind = 'error';
+    } finally {
+      button.disabled = false;
+      button.textContent = '重新读取并核对';
+    }
+  });
+
   renderBatchList();
   renderPlans();
+  refreshSavedDrafts();
   return { state, refreshBatches };
 }
 import { fileToDataUrl } from './similar-product-ui.js';

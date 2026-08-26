@@ -13,6 +13,7 @@ import {
   createAlibabaProductDraft as defaultCreateAlibabaProductDraft,
   exchangeAlibabaCode as defaultExchangeAlibabaCode,
   getAlibabaPublishingCapability as defaultGetAlibabaPublishingCapability,
+  loadAlibabaProductDraft as defaultLoadAlibabaProductDraft,
   loadAlibabaProductContext as defaultLoadAlibabaProductContext,
   loadAlibabaProductTemplate as defaultLoadAlibabaProductTemplate,
   refreshAlibabaToken as defaultRefreshAlibabaToken,
@@ -32,9 +33,11 @@ import {
 } from './obsidian-variant.js';
 import {
   createObsidianPublishingTask as defaultCreateObsidianPublishingTask,
+  listObsidianDrafts as defaultListObsidianDrafts,
   readObsidianPublishingTask as defaultReadObsidianPublishingTask,
   updateObsidianDraftItem as defaultUpdateObsidianDraftItem,
 } from './obsidian-task-store.js';
+import { compareDraftToPlan } from './draft-verification.js';
 import {
   beginDraftAttempt,
   failDraftAttempt,
@@ -145,6 +148,7 @@ export function createServer(options = {}) {
   const refreshAlibabaToken = options.refreshAlibabaToken ?? defaultRefreshAlibabaToken;
   const loadAlibabaProductTemplate = options.loadAlibabaProductTemplate ?? defaultLoadAlibabaProductTemplate;
   const loadAlibabaProductContext = options.loadAlibabaProductContext ?? defaultLoadAlibabaProductContext;
+  const loadAlibabaProductDraft = options.loadAlibabaProductDraft ?? defaultLoadAlibabaProductDraft;
   const uploadAlibabaPhoto = options.uploadAlibabaPhoto ?? defaultUploadAlibabaPhoto;
   const generateProducts = options.generateProducts ?? defaultGenerateProducts;
   const generateSimilarProducts = options.generateSimilarProducts ?? defaultGenerateSimilarProducts;
@@ -161,6 +165,7 @@ export function createServer(options = {}) {
   const createAlibabaProductDraft = options.createAlibabaProductDraft ?? defaultCreateAlibabaProductDraft;
   const getAlibabaPublishingCapability = options.getAlibabaPublishingCapability ?? defaultGetAlibabaPublishingCapability;
   const createObsidianPublishingTask = options.createObsidianPublishingTask ?? defaultCreateObsidianPublishingTask;
+  const listObsidianDrafts = options.listObsidianDrafts ?? defaultListObsidianDrafts;
   const readObsidianPublishingTask = options.readObsidianPublishingTask ?? defaultReadObsidianPublishingTask;
   const updateObsidianDraftItem = options.updateObsidianDraftItem ?? defaultUpdateObsidianDraftItem;
   const previewSessions = new Map();
@@ -262,6 +267,46 @@ export function createServer(options = {}) {
           if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;
           throw error;
         }
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/obsidian/drafts') {
+        sendJson(response, 200, { drafts: await listObsidianDrafts(rootDir) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/draft/verify') {
+        const body = await readJson(request);
+        const taskId = String(body.taskId || '');
+        const planId = String(body.planId || '');
+        const task = await readObsidianPublishingTask(rootDir, taskId);
+        const item = task.items.find((candidate) => candidate.planId === planId);
+        if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+        if (item.status !== 'draft_created' || !item.draftProductId) {
+          throw Object.assign(new Error('这个方案还没有可读取的已创建草稿'), { status: 409 });
+        }
+        const batch = await readObsidianBatch(obsidianRoot, task.relativePath);
+        const plan = batch.plans.find((candidate) => candidate.id === planId);
+        if (!plan) throw Object.assign(new Error('Obsidian 批次中不存在这个方案'), { status: 400 });
+        let draft;
+        try {
+          draft = await loadAlibabaProductDraft(body.config, {
+            productId: item.draftProductId,
+            categoryId: task.context?.categoryId,
+            language: task.context?.language,
+          });
+        } catch (error) {
+          error.status = error.status || 502;
+          throw error;
+        }
+        const comparison = compareDraftToPlan(plan, analyzeProductSchema(draft.schemaXml));
+        sendJson(response, 200, {
+          taskId: task.id,
+          planId,
+          draftProductId: item.draftProductId,
+          traceId: draft.traceId || '',
+          comparison,
+        });
         return;
       }
 
@@ -448,7 +493,11 @@ export function createServer(options = {}) {
 
       sendJson(response, 404, { error: '页面不存在' });
     } catch (error) {
-      sendJson(response, error.status ?? 500, { error: error.message || '服务器内部错误' });
+      sendJson(response, error.status ?? 500, Object.fromEntries(Object.entries({
+        error: error.message || '服务器内部错误',
+        code: error.code,
+        traceId: error.traceId,
+      }).filter(([, value]) => value !== undefined && value !== '')));
     }
   });
 }
