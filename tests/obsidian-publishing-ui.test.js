@@ -7,6 +7,7 @@ import {
   commonSellingPointCandidate,
   createObsidianPublishingState,
   formatDraftVerification,
+  formatPreviewSuccess,
   imageFileKey,
   imageContentKey,
   invalidatePreviewState,
@@ -191,6 +192,13 @@ test('formatDraftVerification summarizes successful and mismatched read-only che
       },
     },
   }), '发现差异：属性。属性明细：顺序不同；Attribute 3：期望“Value 3”，草稿“Changed value”；缺少 Attribute 4=Value 4；多出 Extra=Extra value。追踪号 trace-3');
+});
+
+test('formatPreviewSuccess reports the actual pending preview count', () => {
+  assert.equal(
+    formatPreviewSuccess(3),
+    '3 份完整预览均通过：标题、卖点、FAQ、10 条属性和 6 张图片已替换，受保护字段保持不变。',
+  );
 });
 
 test('buildPreviewRequest preserves source product publishing context', () => {

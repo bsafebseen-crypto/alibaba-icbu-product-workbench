@@ -14,18 +14,33 @@ export function normalizeImageDigest(value) {
   return digest;
 }
 
+function normalizePhotobankUrl(value) {
+  const raw = String(value || '').trim();
+  const candidate = raw.startsWith('//') ? `https:${raw}` : raw;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw new Error('图片银行地址格式无效');
+  }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !url.hostname) {
+    throw new Error('图片银行地址格式无效');
+  }
+  url.protocol = 'https:';
+  return url.toString();
+}
+
 function normalizeEntry(entry = {}) {
   const sha256 = normalizeImageDigest(entry.sha256);
   const fileName = String(entry.fileName || '').trim().split(/[\\/]/).pop();
   const size = Number(entry.size);
   const mimeType = String(entry.mimeType || '').trim().toLowerCase();
   const fileId = String(entry.fileId || '').trim();
-  const photobankUrl = String(entry.photobankUrl || '').trim();
+  const photobankUrl = normalizePhotobankUrl(entry.photobankUrl);
   const source = String(entry.source || '').trim();
   if (!fileName || !Number.isFinite(size) || size < 0) throw new Error('图片文件元数据无效');
   if (!ALLOWED_MIME_TYPES.has(mimeType)) throw new Error('图片 MIME 类型无效');
   if (!fileId) throw new Error('图片银行 fileId 不能为空');
-  if (!/^https:\/\//i.test(photobankUrl)) throw new Error('图片银行地址必须使用 HTTPS');
   if (!['upload', 'photobank-list'].includes(source)) throw new Error('图片缓存来源无效');
   return {
     sha256, fileName, size, mimeType, fileId, photobankUrl, source,

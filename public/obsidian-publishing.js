@@ -148,6 +148,10 @@ export function formatDraftVerification(result = {}) {
   return `发现差异：${differences.join('、') || '无法识别字段'}。${detail}${trace}`;
 }
 
+export function formatPreviewSuccess(count) {
+  return `${count} 份完整预览均通过：标题、卖点、FAQ、10 条属性和 6 张图片已替换，受保护字段保持不变。`;
+}
+
 export function buildPreviewRequest(state, imagesByPlan) {
   return {
     relativePath: state.batch.source.relativePath,
@@ -730,9 +734,12 @@ export function initObsidianPublishing({
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(preview.planId)}"]`);
         text(card?.querySelector('.obsidian-variant-status'), `完整预览通过 · ${preview.fingerprint.slice(0, 10)}`);
         const button = card?.querySelector('.obsidian-draft-button');
-        if (button) button.disabled = false;
+        if (button) {
+          button.disabled = false;
+          button.textContent = '确认并创建此商品草稿';
+        }
       }
-      setPreviewStatus('四份完整预览均通过：标题、卖点、FAQ、10 条属性和 6 张图片已替换，受保护字段保持不变。', 'success');
+      setPreviewStatus(formatPreviewSuccess(state.previews.length), 'success');
       text(elements.draftStatus, '草稿测试已就绪。请逐个核对方案卡，然后单独点击并确认。');
     } catch (error) {
       setPreviewStatus(error.message, 'error');

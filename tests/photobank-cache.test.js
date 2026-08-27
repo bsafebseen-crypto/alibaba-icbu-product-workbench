@@ -32,7 +32,7 @@ test('photobank cache persists only safe basename and upload metadata', async ()
   assert.doesNotMatch(raw, /secret-folder|must-not-persist|base64|dataUrl|accessToken/);
 });
 
-test('photobank cache blocks malformed and conflicting mappings', async () => {
+test('photobank cache normalizes Alibaba HTTP URLs and blocks malformed or conflicting mappings', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'photobank-cache-'));
   const entry = {
     sha256: 'c'.repeat(64), fileName: '1.jpg', size: 10, mimeType: 'image/jpeg',
@@ -47,8 +47,12 @@ test('photobank cache blocks malformed and conflicting mappings', async () => {
     savePhotobankCacheEntry(root, { ...entry, sha256: 'bad' }),
     /SHA-256 无效/,
   );
+  const upgraded = await savePhotobankCacheEntry(root, {
+    ...entry, sha256: 'd'.repeat(64), photobankUrl: 'http://img.alicdn.com/generated.jpg',
+  });
+  assert.equal(upgraded.photobankUrl, 'https://img.alicdn.com/generated.jpg');
   await assert.rejects(
-    savePhotobankCacheEntry(root, { ...entry, sha256: 'd'.repeat(64), photobankUrl: 'http://unsafe' }),
-    /图片银行地址必须使用 HTTPS/,
+    savePhotobankCacheEntry(root, { ...entry, sha256: 'e'.repeat(64), photobankUrl: 'ftp://unsafe' }),
+    /图片银行地址格式无效/,
   );
 });
