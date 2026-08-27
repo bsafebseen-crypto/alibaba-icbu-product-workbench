@@ -1,5 +1,10 @@
 import { XMLBuilder, XMLParser, XMLValidator } from 'fast-xml-parser';
 
+import {
+  readBoundSellingPoints,
+  writeBoundSellingPoints,
+} from './schema-role-binding.js';
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
@@ -349,10 +354,11 @@ function matchRole(field) {
     .find(([, pattern]) => identities.some((identity) => pattern.test(identity)))?.[0] || '';
 }
 
-export function analyzeProductSchema(schemaXml) {
+export function analyzeProductSchema(schemaXml, options = {}) {
   const xml = String(schemaXml || '');
   if (XMLValidator.validate(xml) !== true) throw new Error('Schema XML 无效');
-  const fields = collectFields(parser.parse(xml));
+  const tree = parser.parse(xml);
+  const fields = collectFields(tree);
   const recognized = {
     title: null,
     productSummary: null,
@@ -369,7 +375,17 @@ export function analyzeProductSchema(schemaXml) {
     else if (role === 'customAttributes') {
       recognized[role] = { fieldId, items: readCustomAttributes(field) };
     } else if (role === 'images') recognized[role] = { fieldId, items: readAlibabaImages(field) };
-    else recognized[role] = { fieldId, value: findValue(field) };
+    else if (role === 'productSummary' && normalizeIdentity(fieldId) === 'textdesc') {
+      recognized[role] = { fieldId, value: findValue(field), confirmed: false };
+    } else recognized[role] = { fieldId, value: findValue(field) };
+  }
+
+  if (options.sellingPointBinding) {
+    recognized.productSummary = {
+      fieldId: String(options.sellingPointBinding.fieldId || ''),
+      value: readBoundSellingPoints(tree, options.sellingPointBinding),
+      confirmed: true,
+    };
   }
 
   const warnings = [];
@@ -386,8 +402,13 @@ export function createProductPreview(schemaXml, variant = {}) {
   if (title.length > 128) throw new Error('标题不能超过 128 个字符');
 
   const xml = String(schemaXml || '');
-  const analysis = analyzeProductSchema(xml);
+  const analysis = analyzeProductSchema(xml, {
+    sellingPointBinding: variant.sellingPointBinding,
+  });
   if (analysis.warnings.length) throw new Error(`Schema 缺少可安全替换的字段：${analysis.warnings.join('、')}`);
+  if (analysis.recognized.productSummary?.confirmed === false) {
+    throw new Error('卖点字段尚未校准，不能生成商品预览');
+  }
 
   const tree = parser.parse(xml);
   const fields = collectFields(tree);
@@ -395,11 +416,22 @@ export function createProductPreview(schemaXml, variant = {}) {
     fields.map((field) => [matchRole(field), field]).filter(([role]) => role),
   );
   const titleCarrier = findValueCarrier(roleFields.title);
-  const summaryCarrier = findValueCarrier(roleFields.productSummary);
-  if (!titleCarrier || !summaryCarrier) throw new Error('Schema 缺少可安全替换的字段');
+  const summaryCarrier = variant.sellingPointBinding
+    ? null
+    : findValueCarrier(roleFields.productSummary);
+  if (!titleCarrier || (!summaryCarrier && !variant.sellingPointBinding)) {
+    throw new Error('Schema 缺少可安全替换的字段');
+  }
 
   titleCarrier.node[titleCarrier.key] = title;
-  summaryCarrier.node[summaryCarrier.key] = String(variant.sellingPoints || '').trim();
+  if (variant.sellingPointBinding) {
+    writeBoundSellingPoints(tree, variant.sellingPointBinding, variant.sellingPoints);
+    if (readBoundSellingPoints(tree, variant.sellingPointBinding) !== String(variant.sellingPoints || '').trim()) {
+      throw new Error('卖点字段写入后校验失败');
+    }
+  } else {
+    summaryCarrier.node[summaryCarrier.key] = String(variant.sellingPoints || '').trim();
+  }
 
   const faqParts = collectFaqParts(roleFields.faq);
   const questionParts = faqParts.filter((part) => part.identity.includes('question'));

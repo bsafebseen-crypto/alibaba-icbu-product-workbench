@@ -52,6 +52,22 @@ test('compareDraftToPlan reports field differences without returning raw XML', (
   assert.equal(JSON.stringify(result).includes('schemaXml'), false);
 });
 
+test('compareDraftToPlan rejects selling points read from an unconfirmed field', () => {
+  const analysis = matchingAnalysis();
+  analysis.recognized.productSummary.confirmed = false;
+
+  const result = compareDraftToPlan(plan, analysis);
+
+  assert.equal(result.exactMatch, false);
+  assert.deepEqual(result.fields.sellingPoints, {
+    match: false,
+    expected: 'Expected selling points',
+    actual: 'Expected selling points',
+    fieldConfirmed: false,
+  });
+  assert.deepEqual(result.differences, ['sellingPoints']);
+});
+
 test('compareDraftToPlan identifies reordered, missing, unexpected, and changed attributes', () => {
   const analysis = matchingAnalysis();
   const actual = analysis.recognized.customAttributes.items;

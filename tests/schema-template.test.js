@@ -172,6 +172,12 @@ const renderedAlibabaSchemaXml = `
   <field id="sku"><value>KEEP-SKU</value></field>
 </itemSchema>`;
 
+const confirmedSellingPointBinding = {
+  fieldId: 'textDesc',
+  carrierPath: ['value'],
+  structureType: 'single-text',
+};
+
 test('analyzeProductSchema reads real Alibaba render value nodes instead of rule hints', () => {
   const analysis = analyzeProductSchema(renderedAlibabaSchemaXml);
 
@@ -182,6 +188,7 @@ test('analyzeProductSchema reads real Alibaba render value nodes instead of rule
   assert.deepEqual(analysis.recognized.productSummary, {
     fieldId: 'textDesc',
     value: 'Original Alibaba Summary',
+    confirmed: false,
   });
   assert.deepEqual(analysis.recognized.faq.items.slice(0, 2), [
     { question: 'Question 1?', answer: 'Answer 1.' },
@@ -201,7 +208,19 @@ test('analyzeProductSchema reads real Alibaba render value nodes instead of rule
   assert.deepEqual(analysis.warnings, []);
 });
 
-test('createProductPreview writes real Alibaba render nodes and preserves later FAQ rows', () => {
+test('createProductPreview blocks an unconfirmed textDesc selling-point field', () => {
+  assert.throws(() => createProductPreview(renderedAlibabaSchemaXml, {
+    title: 'New Alibaba Title',
+    sellingPoints: 'New Alibaba Summary',
+    faqItems: Array.from({ length: 5 }, (_, index) => ({
+      question: `New question ${index + 1}?`,
+      answer: `New answer ${index + 1}.`,
+    })),
+    customAttributes: [{ name: 'Material', value: 'Oxford Polyester' }],
+  }), /卖点字段尚未校准/);
+});
+
+test('createProductPreview writes a confirmed Alibaba selling-point carrier and preserves later FAQ rows', () => {
   const faqItems = Array.from({ length: 5 }, (_, index) => ({
     question: `New question ${index + 1}?`,
     answer: `New answer ${index + 1}.`,
@@ -215,11 +234,15 @@ test('createProductPreview writes real Alibaba render nodes and preserves later 
       { name: 'Material', value: 'Oxford Polyester' },
       { name: 'Closure Style', value: 'Smooth Front Zipper' },
     ],
+    sellingPointBinding: confirmedSellingPointBinding,
   });
-  const analysis = analyzeProductSchema(preview.previewXml);
+  const analysis = analyzeProductSchema(preview.previewXml, {
+    sellingPointBinding: confirmedSellingPointBinding,
+  });
 
   assert.equal(analysis.recognized.title.value, 'New Alibaba Title');
   assert.equal(analysis.recognized.productSummary.value, 'New Alibaba Summary');
+  assert.equal(analysis.recognized.productSummary.confirmed, true);
   assert.deepEqual(analysis.recognized.faq.items.slice(0, 5), faqItems);
   assert.deepEqual(analysis.recognized.faq.items[5], {
     question: 'Keep question 6?', answer: 'Keep answer 6.',
@@ -245,6 +268,7 @@ test('createProductPreview replaces scImages with six Alibaba photo-bank images'
     })),
     customAttributes: [{ name: 'Material', value: 'Polyester' }],
     alibabaImages,
+    sellingPointBinding: confirmedSellingPointBinding,
   });
 
   assert.deepEqual(analyzeProductSchema(preview.previewXml).recognized.images.items, alibabaImages);
@@ -275,6 +299,7 @@ test('createProductPreview replaces scImages stored in one shared image containe
     })),
     customAttributes: [{ name: 'Material', value: 'Polyester' }],
     alibabaImages,
+    sellingPointBinding: confirmedSellingPointBinding,
   });
 
   assert.deepEqual(analyzeProductSchema(preview.previewXml).recognized.images.items, alibabaImages);
@@ -294,6 +319,7 @@ test('createProductPreview rejects incomplete Alibaba image metadata', () => {
       fileId: '',
       url: 'https://img/x.jpg',
     })),
+    sellingPointBinding: confirmedSellingPointBinding,
   }), /fileId 和 URL/);
 });
 
@@ -320,6 +346,7 @@ test('assertOnlyMutableSchemaRolesChanged ignores parser type drift after XML re
       answer: `A${index}.`,
     })),
     customAttributes: [{ name: 'Material', value: 'Polyester' }],
+    sellingPointBinding: confirmedSellingPointBinding,
   });
 
   assert.doesNotThrow(() => (
@@ -340,6 +367,7 @@ test('createProductPreview keeps true-valued Alibaba attributes as valid XML', (
       answer: `A${index}.`,
     })),
     customAttributes: [{ name: 'Material', value: 'Polyester' }],
+    sellingPointBinding: confirmedSellingPointBinding,
   });
 
   assert.equal(XMLValidator.validate(preview.previewXml), true);

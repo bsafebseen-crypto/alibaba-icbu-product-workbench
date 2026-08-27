@@ -54,6 +54,7 @@ export function compareDraftToPlan(plan = {}, analysis = {}) {
     ...(customAttributesMatch && !attributeDetails.orderMatch ? { orderChanged: true } : {}),
     ...(!customAttributesMatch ? { details: attributeDetails } : {}),
   };
+  const sellingPointFieldConfirmed = recognized.productSummary?.confirmed !== false;
   const fields = {
     title: {
       match: String(recognized.title?.value || '') === String(plan.title || ''),
@@ -61,9 +62,11 @@ export function compareDraftToPlan(plan = {}, analysis = {}) {
       actual: String(recognized.title?.value || ''),
     },
     sellingPoints: {
-      match: String(recognized.productSummary?.value || '') === String(plan.sellingPoints || ''),
+      match: sellingPointFieldConfirmed
+        && String(recognized.productSummary?.value || '') === String(plan.sellingPoints || ''),
       expected: String(plan.sellingPoints || ''),
       actual: String(recognized.productSummary?.value || ''),
+      ...(!sellingPointFieldConfirmed ? { fieldConfirmed: false } : {}),
     },
     faqs: {
       match: expectedFaqs.length === 5 && equal(actualFaqs, expectedFaqs),
