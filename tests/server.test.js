@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -569,6 +569,66 @@ test('POST /api/obsidian/source-product loads read-only context and schema analy
       return { sourceProductId: input.productId, categoryId: '32905', schemaXml: '<itemSchema />' };
     },
     analyzeProductSchema: () => ({ warnings: [] }),
+  });
+});
+
+test('photobank cache routes recover a successful digest-backed upload', async () => {
+  const sha256 = 'a'.repeat(64);
+  await withServer(async (baseUrl) => {
+    const upload = await fetch(`${baseUrl}/api/alibaba/photobank/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key', appSecret: 'secret', accessToken: 'token' },
+        image: { fileName: 'main.jpg', dataUrl: 'data:image/jpeg;base64,AQID', sha256 },
+      }),
+    });
+    assert.equal(upload.status, 200);
+    const resolved = await fetch(`${baseUrl}/api/alibaba/photobank/cache/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: [{ sha256 }] }),
+    });
+    assert.equal(resolved.status, 200);
+    assert.deepEqual(await resolved.json(), {
+      uploads: {
+        [sha256]: {
+          fileName: 'main.jpg', fileId: 'file-1',
+          photobankUrl: 'https://img.example.com/main.jpg',
+        },
+      },
+    });
+  }, {
+    uploadAlibabaPhoto: async () => ({
+      fileName: 'main.jpg', fileId: 'file-1',
+      photobankUrl: 'https://img.example.com/main.jpg', requestId: 'request-1',
+    }),
+  });
+});
+
+test('fixed image routes require confirmation and return revalidated safe metadata', async () => {
+  await withServer(async (baseUrl, rootDir) => {
+    const first = path.join(rootDir, '2.jpg');
+    const second = path.join(rootDir, '证书主图.jpg');
+    await writeFile(first, Buffer.from([1, 2, 3]));
+    await writeFile(second, Buffer.from([4, 5, 6]));
+    const blocked = await fetch(`${baseUrl}/api/obsidian/fixed-images`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slots: [{ name: '通用图', filePath: first }, { name: '证书图', filePath: second }] }),
+    });
+    assert.equal(blocked.status, 400);
+    const saved = await fetch(`${baseUrl}/api/obsidian/fixed-images`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirmed: true,
+        slots: [{ name: '通用图', filePath: first }, { name: '证书图', filePath: second }],
+      }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await saved.json()).slots.every((slot) => slot.ready), true);
+    const reread = await fetch(`${baseUrl}/api/obsidian/fixed-images`);
+    const text = await reread.text();
+    assert.equal(reread.status, 200);
+    assert.doesNotMatch(text, /base64|imageBytes|accessToken/);
+    assert.equal(JSON.parse(text).slots.length, 2);
   });
 });
 

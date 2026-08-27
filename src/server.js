@@ -54,6 +54,14 @@ import {
   validateSellingPointBinding as defaultValidateSellingPointBinding,
 } from './schema-role-binding.js';
 import {
+  resolvePhotobankCache as defaultResolvePhotobankCache,
+  savePhotobankCacheEntry as defaultSavePhotobankCacheEntry,
+} from './photobank-cache.js';
+import {
+  readFixedImageConfig as defaultReadFixedImageConfig,
+  saveFixedImageConfig as defaultSaveFixedImageConfig,
+} from './fixed-image-config.js';
+import {
   listTasks as defaultListTasks,
   readTask as defaultReadTask,
   saveTask,
@@ -178,6 +186,10 @@ export function createServer(options = {}) {
     ?? defaultSummarizeSellingPointCandidates;
   const validateSellingPointBinding = options.validateSellingPointBinding
     ?? defaultValidateSellingPointBinding;
+  const resolvePhotobankCache = options.resolvePhotobankCache ?? defaultResolvePhotobankCache;
+  const savePhotobankCacheEntry = options.savePhotobankCacheEntry ?? defaultSavePhotobankCacheEntry;
+  const readFixedImageConfig = options.readFixedImageConfig ?? defaultReadFixedImageConfig;
+  const saveFixedImageConfig = options.saveFixedImageConfig ?? defaultSaveFixedImageConfig;
   const previewSessions = new Map();
 
   return http.createServer(async (request, response) => {
@@ -261,6 +273,20 @@ export function createServer(options = {}) {
           version: source.version,
         });
         sendJson(response, 200, { binding: saved });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/obsidian/fixed-images') {
+        sendJson(response, 200, await readFixedImageConfig(rootDir));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/fixed-images') {
+        const body = await readJson(request);
+        if (body.confirmed !== true) {
+          throw Object.assign(new Error('保存固定副图前必须明确确认'), { status: 400 });
+        }
+        sendJson(response, 200, await saveFixedImageConfig(rootDir, { slots: body.slots }));
         return;
       }
 
@@ -472,7 +498,36 @@ export function createServer(options = {}) {
           groupId: body.groupId,
           extraContext: body.extraContext,
         });
+        if (body.image?.sha256) {
+          await savePhotobankCacheEntry(rootDir, {
+            sha256: body.image.sha256,
+            fileName: body.image.fileName,
+            size: decoded.imageBytes.length,
+            mimeType: decoded.mimeType,
+            fileId: result.fileId,
+            photobankUrl: result.photobankUrl,
+            source: 'upload',
+          });
+        }
         sendJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/alibaba/photobank/cache/resolve') {
+        const body = await readJson(request);
+        if (!Array.isArray(body.images) || body.images.length > 100) {
+          throw Object.assign(new Error('图片缓存查询范围无效'), { status: 400 });
+        }
+        const cache = await resolvePhotobankCache(
+          rootDir,
+          body.images.map((image) => image?.sha256),
+        );
+        const uploads = Object.fromEntries(Object.entries(cache).map(([digest, entry]) => [digest, {
+          fileName: entry.fileName,
+          fileId: entry.fileId,
+          photobankUrl: entry.photobankUrl,
+        }]));
+        sendJson(response, 200, { uploads });
         return;
       }
 
