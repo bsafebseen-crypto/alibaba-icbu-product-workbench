@@ -5,6 +5,8 @@ export function createObsidianPublishingState() {
     basePlanId: '',
     sourceProductId: '',
     sourceContext: null,
+    sellingPointDiagnosis: null,
+    sellingPointBinding: null,
     variants: [],
     filesByPlan: {},
     uploads: {},
@@ -20,6 +22,31 @@ export function createObsidianPublishingState() {
 
 export function imageFileKey(file) {
   return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+export function commonSellingPointCandidate(diagnosis = {}) {
+  const sourceCandidates = Array.isArray(diagnosis.sourceCandidates)
+    ? diagnosis.sourceCandidates
+    : [];
+  const draftCandidates = Array.isArray(diagnosis.draftCandidates)
+    ? diagnosis.draftCandidates
+    : [];
+  const matches = sourceCandidates.flatMap((source) => {
+    if (source.structureType !== 'single-text' || source.carrierPaths?.length !== 1) return [];
+    const path = source.carrierPaths[0];
+    const matchingDrafts = draftCandidates.filter((draft) => (
+      draft.fieldId === source.fieldId
+      && draft.structureType === 'single-text'
+      && JSON.stringify(draft.carrierPaths) === JSON.stringify([path])
+    ));
+    return matchingDrafts.length === 1 ? [{
+      fieldId: source.fieldId,
+      carrierPath: [...path],
+      structureType: 'single-text',
+    }] : [];
+  });
+  if (matches.length !== 1) throw new Error('无法唯一确认卖点字段');
+  return matches[0];
 }
 
 export function resolveUploadedImages(variants, filesByPlan, uploads) {
@@ -109,6 +136,10 @@ export function initObsidianPublishing({
     remaining: documentRef.getElementById('obsidian-remaining-summary'),
     loadSource: documentRef.getElementById('obsidian-load-source'),
     sourceStatus: documentRef.getElementById('obsidian-source-status'),
+    diagnosticDraftId: documentRef.getElementById('obsidian-diagnostic-draft-id'),
+    diagnoseSellingPoints: documentRef.getElementById('obsidian-diagnose-selling-points'),
+    confirmSellingPoint: documentRef.getElementById('obsidian-confirm-selling-point'),
+    sellingPointStatus: documentRef.getElementById('obsidian-selling-point-status'),
     variants: documentRef.getElementById('obsidian-variant-list'),
     uploadImages: documentRef.getElementById('obsidian-upload-images'),
     generatePreviews: documentRef.getElementById('obsidian-generate-previews'),
@@ -129,12 +160,16 @@ export function initObsidianPublishing({
 
   function invalidatePreparedData() {
     state.sourceContext = null;
+    state.sellingPointDiagnosis = null;
+    state.sellingPointBinding = null;
     state.variants = [];
     state.filesByPlan = {};
     state.uploads = {};
     invalidatePreviewState(state);
     elements.uploadImages.disabled = true;
     elements.generatePreviews.disabled = true;
+    elements.diagnoseSellingPoints.disabled = true;
+    elements.confirmSellingPoint.disabled = true;
     elements.variants.innerHTML = '<p>载入母商品 Schema 后显示剩余四套方案。</p>';
     setPreviewStatus('尚未准备图片。');
   }
@@ -348,6 +383,13 @@ export function initObsidianPublishing({
       state.uploads = {};
       invalidatePreviewState(state);
       renderVariants();
+      const latestDraft = state.savedDrafts.find((draft) => (
+        draft.relativePath === state.batch.source.relativePath
+      ));
+      if (latestDraft && !elements.diagnosticDraftId.value) {
+        elements.diagnosticDraftId.value = latestDraft.draftProductId;
+      }
+      elements.diagnoseSellingPoints.disabled = false;
       text(
         elements.sourceStatus,
         `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；未修改商品。`,
@@ -358,6 +400,65 @@ export function initObsidianPublishing({
       text(elements.sourceStatus, error.message);
     } finally {
       elements.loadSource.disabled = false;
+    }
+  });
+  elements.diagnoseSellingPoints.addEventListener('click', async () => {
+    const draftProductId = elements.diagnosticDraftId.value.trim();
+    if (!state.sourceContext || !/^\d+$/.test(draftProductId)) {
+      text(elements.sellingPointStatus, '请先读取母商品并填写已有草稿 ID。');
+      return;
+    }
+    elements.diagnoseSellingPoints.disabled = true;
+    elements.confirmSellingPoint.disabled = true;
+    text(elements.sellingPointStatus, '正在只读比较母商品与草稿的卖点字段…');
+    try {
+      state.sellingPointDiagnosis = await requestJson('/api/obsidian/selling-points/diagnose', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: getAlibabaConfig(),
+          sourceProductId: state.sourceProductId,
+          draftProductId,
+        }),
+      });
+      const candidate = commonSellingPointCandidate(state.sellingPointDiagnosis);
+      state.sellingPointBinding = candidate;
+      elements.confirmSellingPoint.disabled = false;
+      text(
+        elements.sellingPointStatus,
+        `候选字段 ${candidate.fieldId} · ${candidate.structureType}；确认前仍禁止生成草稿。`,
+      );
+    } catch (error) {
+      state.sellingPointDiagnosis = null;
+      state.sellingPointBinding = null;
+      text(elements.sellingPointStatus, error.message);
+    } finally {
+      elements.diagnoseSellingPoints.disabled = false;
+    }
+  });
+  elements.confirmSellingPoint.addEventListener('click', async () => {
+    const binding = state.sellingPointBinding;
+    if (!binding || !windowRef.confirm(
+      `确认将字段 ${binding?.fieldId || ''} 作为当前类目和 Schema 版本的真实卖点字段？\n\n此操作只保存本机字段映射，不修改商品。`,
+    )) return;
+    elements.confirmSellingPoint.disabled = true;
+    try {
+      const result = await requestJson('/api/obsidian/selling-points/binding', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: getAlibabaConfig(),
+          sourceProductId: state.sourceProductId,
+          binding,
+          confirmed: true,
+        }),
+      });
+      state.sellingPointBinding = result.binding;
+      text(
+        elements.sellingPointStatus,
+        `卖点字段已确认：${result.binding.fieldId} · ${result.binding.structureType}`,
+      );
+    } catch (error) {
+      text(elements.sellingPointStatus, error.message);
+      elements.confirmSellingPoint.disabled = false;
     }
   });
   elements.variants.addEventListener('change', (event) => {

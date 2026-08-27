@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -569,6 +569,81 @@ test('POST /api/obsidian/source-product loads read-only context and schema analy
       return { sourceProductId: input.productId, categoryId: '32905', schemaXml: '<itemSchema />' };
     },
     analyzeProductSchema: () => ({ warnings: [] }),
+  });
+});
+
+test('POST /api/obsidian/selling-points/diagnose returns only safe field structure summaries', async () => {
+  const sourceSchema = '<itemSchema><field id="textDesc" name="商品卖点"><value>Source summary</value></field><field id="detail"><value>private product detail</value></field></itemSchema>';
+  const draftSchema = '<itemSchema><field id="textDesc" name="商品卖点"><value>Draft summary</value></field></itemSchema>';
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/selling-points/diagnose`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key', appSecret: 'must-not-return', accessToken: 'token' },
+        sourceProductId: '1601933369105',
+        draftProductId: '1601933441594',
+      }),
+    });
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    assert.doesNotMatch(text, /itemSchema|private product detail|must-not-return|Source summary|Draft summary/);
+    assert.deepEqual(JSON.parse(text), {
+      context: { categoryId: '301504', language: 'en', version: 'trade.1.1' },
+      sourceCandidates: [{
+        fieldId: 'textDesc', fieldName: '商品卖点', structureType: 'single-text',
+        carrierPaths: [['value']], nonEmpty: true,
+      }],
+      draftCandidates: [{
+        fieldId: 'textDesc', fieldName: '商品卖点', structureType: 'single-text',
+        carrierPaths: [['value']], nonEmpty: true,
+      }],
+    });
+  }, {
+    loadAlibabaProductContext: async (_config, { productId }) => ({
+      sourceProductId: productId,
+      categoryId: '301504', language: 'en', version: 'trade.1.1', schemaXml: sourceSchema,
+    }),
+    loadAlibabaProductDraft: async (_config, request) => {
+      assert.deepEqual(request, {
+        productId: '1601933441594', categoryId: '301504', language: 'en',
+      });
+      return { schemaXml: draftSchema };
+    },
+  });
+});
+
+test('POST /api/obsidian/selling-points/binding requires confirmation and stores safe binding metadata', async () => {
+  const schemaXml = '<itemSchema><field id="textDesc" name="商品卖点"><value>Source summary</value></field></itemSchema>';
+  await withServer(async (baseUrl, rootDir) => {
+    const requestBody = {
+      config: { appKey: 'key', appSecret: 'must-not-persist', accessToken: 'token' },
+      sourceProductId: '1601933369105',
+      binding: { fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text' },
+    };
+    const blocked = await fetch(`${baseUrl}/api/obsidian/selling-points/binding`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(blocked.status, 400);
+
+    const response = await fetch(`${baseUrl}/api/obsidian/selling-points/binding`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...requestBody, confirmed: true }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      binding: {
+        fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
+        categoryId: '301504', language: 'en', version: 'trade.1.1',
+      },
+    });
+    const raw = await readFile(path.join(rootDir, 'data', 'alibaba-schema-bindings.json'), 'utf8');
+    assert.doesNotMatch(raw, /must-not-persist|accessToken|itemSchema|Source summary/);
+  }, {
+    loadAlibabaProductContext: async () => ({
+      categoryId: '301504', language: 'en', version: 'trade.1.1', schemaXml,
+    }),
   });
 });
 

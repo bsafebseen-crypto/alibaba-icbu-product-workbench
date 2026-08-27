@@ -314,6 +314,12 @@
           </div>
           <fieldset class="obsidian-plan-list" id="obsidian-plan-list"><legend>选择与该商品对应的方案</legend></fieldset>
           <p class="obsidian-remaining" id="obsidian-remaining-summary">选择母商品方案后，这里会显示剩余 4 个类似品。</p>
+          <div class="obsidian-selling-point-calibration">
+            <label><span>用于校准的已有草稿 ID</span><input id="obsidian-diagnostic-draft-id" type="text" inputmode="numeric" autocomplete="off" placeholder="例如 1601933441594"></label>
+            <button class="button quiet" id="obsidian-diagnose-selling-points" type="button" disabled>校准卖点字段（只读）</button>
+            <button class="button primary" id="obsidian-confirm-selling-point" type="button" disabled>确认这个卖点字段</button>
+            <p id="obsidian-selling-point-status" role="status">尚未校准；校准只读取字段结构，不修改商品。</p>
+          </div>
         </section>
 
         <section class="console-panel obsidian-panel">

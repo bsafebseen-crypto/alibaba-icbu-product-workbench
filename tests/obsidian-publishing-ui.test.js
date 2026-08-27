@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildPreviewRequest,
+  commonSellingPointCandidate,
   createObsidianPublishingState,
   formatDraftVerification,
   imageFileKey,
@@ -22,6 +23,8 @@ test('createObsidianPublishingState starts without persisted product data', () =
     basePlanId: '',
     sourceProductId: '',
     sourceContext: null,
+    sellingPointDiagnosis: null,
+    sellingPointBinding: null,
     variants: [],
     filesByPlan: {},
     uploads: {},
@@ -33,6 +36,23 @@ test('createObsidianPublishingState starts without persisted product data', () =
     loading: false,
     error: '',
   });
+});
+
+test('commonSellingPointCandidate requires one matching source and draft carrier', () => {
+  const candidate = {
+    fieldId: 'textDesc', fieldName: '商品卖点', structureType: 'single-text',
+    carrierPaths: [['value']], nonEmpty: true,
+  };
+  assert.deepEqual(commonSellingPointCandidate({
+    sourceCandidates: [candidate],
+    draftCandidates: [structuredClone(candidate)],
+  }), {
+    fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
+  });
+  assert.throws(() => commonSellingPointCandidate({
+    sourceCandidates: [candidate],
+    draftCandidates: [],
+  }), /无法唯一确认卖点字段/);
 });
 
 test('remainingPlans excludes any selected base plan and preserves source order', () => {

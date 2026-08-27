@@ -49,6 +49,11 @@ import {
   createProductPreview as defaultCreateProductPreview,
 } from './schema-template.js';
 import {
+  saveSellingPointBinding as defaultSaveSellingPointBinding,
+  summarizeSellingPointCandidates as defaultSummarizeSellingPointCandidates,
+  validateSellingPointBinding as defaultValidateSellingPointBinding,
+} from './schema-role-binding.js';
+import {
   listTasks as defaultListTasks,
   readTask as defaultReadTask,
   saveTask,
@@ -168,6 +173,11 @@ export function createServer(options = {}) {
   const listObsidianDrafts = options.listObsidianDrafts ?? defaultListObsidianDrafts;
   const readObsidianPublishingTask = options.readObsidianPublishingTask ?? defaultReadObsidianPublishingTask;
   const updateObsidianDraftItem = options.updateObsidianDraftItem ?? defaultUpdateObsidianDraftItem;
+  const saveSellingPointBinding = options.saveSellingPointBinding ?? defaultSaveSellingPointBinding;
+  const summarizeSellingPointCandidates = options.summarizeSellingPointCandidates
+    ?? defaultSummarizeSellingPointCandidates;
+  const validateSellingPointBinding = options.validateSellingPointBinding
+    ?? defaultValidateSellingPointBinding;
   const previewSessions = new Map();
 
   return http.createServer(async (request, response) => {
@@ -210,6 +220,47 @@ export function createServer(options = {}) {
           ...context,
           analysis: analyzeProductSchema(context.schemaXml),
         });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/selling-points/diagnose') {
+        const body = await readJson(request);
+        const source = await loadAlibabaProductContext(body.config, {
+          productId: body.sourceProductId,
+        });
+        const draft = await loadAlibabaProductDraft(body.config, {
+          productId: body.draftProductId,
+          categoryId: source.categoryId,
+          language: source.language,
+        });
+        sendJson(response, 200, {
+          context: {
+            categoryId: String(source.categoryId || ''),
+            language: String(source.language || ''),
+            version: String(source.version || ''),
+          },
+          sourceCandidates: summarizeSellingPointCandidates(source.schemaXml),
+          draftCandidates: summarizeSellingPointCandidates(draft.schemaXml),
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/selling-points/binding') {
+        const body = await readJson(request);
+        if (body.confirmed !== true) {
+          throw Object.assign(new Error('保存卖点字段绑定前必须明确确认'), { status: 400 });
+        }
+        const source = await loadAlibabaProductContext(body.config, {
+          productId: body.sourceProductId,
+        });
+        const binding = validateSellingPointBinding(source.schemaXml, body.binding);
+        const saved = await saveSellingPointBinding(rootDir, {
+          ...binding,
+          categoryId: source.categoryId,
+          language: source.language,
+          version: source.version,
+        });
+        sendJson(response, 200, { binding: saved });
         return;
       }
 
