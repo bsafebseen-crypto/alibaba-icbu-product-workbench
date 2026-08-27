@@ -3,6 +3,8 @@ import path from 'node:path';
 
 const START_MARKER = '<!-- alibaba-listing-batch:start -->';
 const END_MARKER = '<!-- alibaba-listing-batch:end -->';
+const SELLING_POINTS_START_MARKER = '<!-- selling-points:start -->';
+const SELLING_POINTS_END_MARKER = '<!-- selling-points:end -->';
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 
 export const OBSIDIAN_LISTING_SCHEMA_VERSION = 1;
@@ -26,6 +28,57 @@ export function extractListingPayload(markdown) {
   if (!match) throw new Error('阿里发品机器数据块必须使用 json 代码块');
 
   return JSON.parse(match[1]);
+}
+
+function managedSellingPointsByPlan(markdown) {
+  const machineBlockStart = markdown.indexOf(START_MARKER);
+  const humanMarkdown = machineBlockStart >= 0 ? markdown.slice(0, machineBlockStart) : markdown;
+  const headings = [...humanMarkdown.matchAll(/^##\s+方案\s+(\d+)(?:[：:].*)?$/gm)];
+  const values = new Map();
+
+  headings.forEach((heading, index) => {
+    const planId = `plan-${heading[1]}`;
+    if (values.has(planId)) throw new Error(`${planId} 的正文方案标题不能重复`);
+    const sectionEnd = headings[index + 1]?.index ?? humanMarkdown.length;
+    const section = humanMarkdown.slice(heading.index + heading[0].length, sectionEnd);
+    const starts = section.split(SELLING_POINTS_START_MARKER).length - 1;
+    const ends = section.split(SELLING_POINTS_END_MARKER).length - 1;
+    if (starts !== 1 || ends !== 1) throw new Error(`${planId} 必须包含一个正文卖点块`);
+
+    const start = section.indexOf(SELLING_POINTS_START_MARKER);
+    const end = section.indexOf(SELLING_POINTS_END_MARKER, start + SELLING_POINTS_START_MARKER.length);
+    if (end < start) throw new Error(`${planId} 的正文卖点块顺序无效`);
+    const block = section.slice(start + SELLING_POINTS_START_MARKER.length, end);
+    const headingMatch = /^####\s+Selling Points\s*$/im.exec(block);
+    if (!headingMatch) throw new Error(`${planId} 的正文卖点块缺少 Selling Points 标题`);
+    const sellingPointLines = block
+      .slice(headingMatch.index + headingMatch[0].length)
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const match = /^\s*•\s+(.+?)\s*$/.exec(line);
+        return match ? [`• ${match[1]}`] : [];
+      });
+    if (sellingPointLines.length !== 5) {
+      throw new Error(`${planId} 的正文卖点必须正好包含 5 条`);
+    }
+    values.set(planId, sellingPointLines.join('\n'));
+  });
+
+  return values;
+}
+
+function applyManagedSellingPoints(payload, markdown) {
+  const values = managedSellingPointsByPlan(markdown);
+  if (!Array.isArray(payload?.plans)) return payload;
+  return {
+    ...payload,
+    plans: payload.plans.map((plan) => {
+      const planId = String(plan?.id || '').trim();
+      const sellingPoints = values.get(planId);
+      if (!sellingPoints) throw new Error(`${planId || '未知方案'} 缺少有效的正文卖点`);
+      return { ...plan, sellingPoints };
+    }),
+  };
 }
 
 function requireRecord(value, path) {
@@ -182,7 +235,7 @@ export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativ
   if (fileStat.size > MAX_MARKDOWN_BYTES) throw new Error('Markdown 文件不能超过 2 MiB');
 
   const markdown = await readFile(realFile, 'utf8');
-  return validateListingBatch(extractListingPayload(markdown), {
+  return validateListingBatch(applyManagedSellingPoints(extractListingPayload(markdown), markdown), {
     relativePath: portableRelativePath(realRoot, realFile),
     fileName: path.basename(realFile),
     modifiedAt: fileStat.mtime.toISOString(),

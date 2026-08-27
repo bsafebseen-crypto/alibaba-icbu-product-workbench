@@ -33,9 +33,26 @@ function validPayload() {
 }
 
 function markdownFor(payload) {
+  const readablePlans = payload.plans.flatMap((plan, planIndex) => [
+    `## 方案 ${planIndex + 1}：测试方案`,
+    '',
+    '<!-- selling-points:start -->',
+    '#### 卖点策略说明',
+    '',
+    '测试说明。',
+    '',
+    '#### Selling Points',
+    '',
+    ...Array.from({ length: 5 }, (_, pointIndex) => (
+      `• Plan ${planIndex + 1} Point ${pointIndex + 1}: Verified selling point ${pointIndex + 1}.`
+    )),
+    '<!-- selling-points:end -->',
+    '',
+  ]);
   return [
     '# Human-readable listing',
     '',
+    ...readablePlans,
     '<!-- alibaba-listing-batch:start -->',
     '```json',
     JSON.stringify(payload),
@@ -120,8 +137,29 @@ test('readObsidianBatch returns a validated batch for a relative Markdown path',
   const batch = await readObsidianBatch(root, 'batch.md');
 
   assert.equal(batch.batchId, 'reflective-vest-001');
+  assert.equal(batch.plans[2].sellingPoints, [
+    '• Plan 3 Point 1: Verified selling point 1.',
+    '• Plan 3 Point 2: Verified selling point 2.',
+    '• Plan 3 Point 3: Verified selling point 3.',
+    '• Plan 3 Point 4: Verified selling point 4.',
+    '• Plan 3 Point 5: Verified selling point 5.',
+  ].join('\n'));
   assert.equal(batch.source.relativePath, 'batch.md');
   assert.equal(typeof batch.source.modifiedAt, 'string');
+});
+
+test('readObsidianBatch rejects a managed selling-point block without exactly five bullets', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-points-'));
+  const markdown = markdownFor(validPayload()).replace(
+    '• Plan 3 Point 5: Verified selling point 5.\n',
+    '',
+  );
+  await writeFile(path.join(root, 'batch.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'batch.md'),
+    /plan-3 的正文卖点必须正好包含 5 条/,
+  );
 });
 
 test('readObsidianBatch blocks traversal, absolute paths, and non-Markdown files', async () => {
