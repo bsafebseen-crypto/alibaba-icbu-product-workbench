@@ -7,6 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 import { createServer } from '../src/server.js';
 
+const sellingPointBinding = {
+  fieldId: 'sellingPoints', carrierPath: ['value'], structureType: 'single-text',
+  categoryId: '32905', language: 'en_US', version: 'trade.1.1',
+};
+
 async function withServer(run, options = {}) {
   const rootDir = await mkdtemp(path.join(tmpdir(), 'icbu-server-'));
   const server = createServer({ rootDir, ...options });
@@ -761,7 +766,12 @@ test('POST /api/obsidian/preview builds four fingerprinted previews from the sto
       body: JSON.stringify({
         relativePath: 'batch.md',
         basePlanId: 'base',
-        schemaXml: '<itemSchema />',
+        planIds: ['variant-1', 'variant-2', 'variant-3', 'variant-4'],
+        sourceContext: {
+          sourceProductId: '1601933369105', categoryId: '32905', language: 'en_US',
+          version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        sellingPointBinding,
         imagesByPlan,
       }),
     });
@@ -776,6 +786,8 @@ test('POST /api/obsidian/preview builds four fingerprinted previews from the sto
   }, {
     readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
     createObsidianVariants: () => Array.from({ length: 4 }, (_, index) => ({ planId: `variant-${index + 1}` })),
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
     createStrictProductPreview: (schemaXml, variant) => {
       assert.equal(schemaXml, '<itemSchema />');
       assert.equal(variant.alibabaImages.length, 6);
@@ -789,13 +801,68 @@ test('POST /api/obsidian/preview rejects missing image assignments before schema
     const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ relativePath: 'batch.md', basePlanId: 'base', schemaXml: '<itemSchema />', imagesByPlan: {} }),
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601933369105', categoryId: '32905', language: 'en_US',
+          version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        sellingPointBinding,
+        imagesByPlan: {},
+      }),
     });
     assert.equal(response.status, 400);
     assert.match((await response.json()).error, /variant-1.*6 张图片/);
   }, {
     readObsidianBatch: async () => ({ plans: [] }),
     createObsidianVariants: () => Array.from({ length: 4 }, (_, index) => ({ planId: `variant-${index + 1}` })),
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+  });
+});
+
+test('POST /api/obsidian/preview requires persisted selling-point binding and rejects completed plans', async () => {
+  const requestBody = {
+    relativePath: 'batch.md',
+    basePlanId: 'base',
+    planIds: ['variant-1'],
+    sourceContext: {
+      sourceProductId: '1601933369105', categoryId: '32905', language: 'en_US',
+      version: 'trade.1.1', schemaXml: '<itemSchema />',
+    },
+    imagesByPlan: {
+      'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+    },
+  };
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /卖点字段.*校准/);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }, { planId: 'variant-2' }],
+    readSellingPointBinding: async () => null,
+  });
+
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody),
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /variant-1.*已有草稿/);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }, { planId: 'variant-2' }],
+    readSellingPointBinding: async () => ({
+      fieldId: 'sellingPoints', carrierPath: ['value'], structureType: 'single-text',
+      categoryId: '32905', language: 'en_US', version: 'trade.1.1',
+    }),
+    validateSellingPointBinding: (_schemaXml, binding) => binding,
+    listCompletedObsidianPlanIds: async () => ['variant-1'],
   });
 });
 
@@ -817,6 +884,8 @@ test('POST /api/obsidian/draft requires confirmation and creates one fingerprint
           version: 'trade.1.1',
           schemaXml: '<itemSchema />',
         },
+        planIds: ['variant-1'],
+        sellingPointBinding,
         imagesByPlan: { 'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })) },
       }),
     });
@@ -861,6 +930,8 @@ test('POST /api/obsidian/draft requires confirmation and creates one fingerprint
   }, {
     readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
     createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
     createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
     getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true, supportPostWholesale: false }),
     createAlibabaProductDraft: async (config, input) => {
@@ -881,6 +952,7 @@ test('POST /api/obsidian/draft marks a timeout unknown and blocks retry', async 
       body: JSON.stringify({
         relativePath: 'batch.md', basePlanId: 'base',
         sourceContext: { sourceProductType: 'sourcing', categoryId: '32905', language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<itemSchema />' },
+        planIds: ['variant-1'], sellingPointBinding,
         imagesByPlan: { 'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })) },
       }),
     })).json();
@@ -901,6 +973,8 @@ test('POST /api/obsidian/draft marks a timeout unknown and blocks retry', async 
   }, {
     readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
     createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
     createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
     getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
     createAlibabaProductDraft: async () => {
@@ -966,6 +1040,7 @@ test('POST /api/obsidian/draft/verify reads one persisted draft and returns safe
   }, {
     readObsidianPublishingTask: async () => ({
       id: 'task-1', relativePath: 'batch.md', context: { categoryId: '301504', language: 'en_US' },
+      sellingPointBinding,
       items: [{ planId: 'plan-2', status: 'draft_created', draftProductId: '1601933441594' }],
     }),
     readObsidianBatch: async () => ({ plans: [{ id: 'plan-2', title: 'Expected title', sellingPoints: 'Expected selling points', faqs, customAttributes }] }),
@@ -973,6 +1048,7 @@ test('POST /api/obsidian/draft/verify reads one persisted draft and returns safe
       received = { config, input };
       return { schemaXml: '<itemSchema />', traceId: 'trace-1' };
     },
+    validateSellingPointBinding: () => sellingPointBinding,
     analyzeProductSchema: () => ({
       recognized: {
         title: { value: 'Expected title' },

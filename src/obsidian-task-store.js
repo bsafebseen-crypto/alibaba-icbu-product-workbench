@@ -22,6 +22,20 @@ function safeContext(context = {}) {
   };
 }
 
+function safeSellingPointBinding(binding = {}) {
+  const safe = {
+    fieldId: String(binding.fieldId || ''),
+    carrierPath: Array.isArray(binding.carrierPath)
+      ? binding.carrierPath.map((part) => String(part))
+      : [],
+    structureType: String(binding.structureType || ''),
+    categoryId: String(binding.categoryId || ''),
+    language: String(binding.language || ''),
+    version: String(binding.version || ''),
+  };
+  return safe.fieldId && safe.carrierPath.length && safe.structureType ? safe : null;
+}
+
 function safeItem(item = {}) {
   return Object.fromEntries(Object.entries({
     planId: String(item.planId || ''),
@@ -56,6 +70,9 @@ export async function createObsidianPublishingTask(rootDir, input = {}, requeste
     basePlanId: String(input.basePlanId || ''),
     sourceProductId: String(input.sourceProductId || ''),
     context: safeContext(input.context),
+    ...(safeSellingPointBinding(input.sellingPointBinding)
+      ? { sellingPointBinding: safeSellingPointBinding(input.sellingPointBinding) }
+      : {}),
     items: Array.isArray(input.items) ? input.items.map(safeItem) : [],
     createdAt: now,
     updatedAt: now,
@@ -88,15 +105,32 @@ export async function listObsidianDrafts(rootDir) {
     .map(async (name) => JSON.parse(await readFile(path.join(directory, name), 'utf8'))));
   return tasks.flatMap((task) => (Array.isArray(task.items) ? task.items : [])
     .filter((item) => item.status === 'draft_created' && item.draftProductId)
-    .map((item) => ({
+    .map((item) => Object.fromEntries(Object.entries({
       taskId: String(task.id || ''),
       batchId: String(task.batchId || ''),
       relativePath: String(task.relativePath || ''),
+      basePlanId: String(task.basePlanId || ''),
+      sourceProductId: String(task.sourceProductId || ''),
       planId: String(item.planId || ''),
       draftProductId: String(item.draftProductId),
       completedAt: String(item.completedAt || ''),
-    })))
+    }).filter(([, value]) => value !== ''))))
     .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
+}
+
+export async function listCompletedObsidianPlanIds(rootDir, identity = {}) {
+  const relativePath = String(identity.relativePath || '');
+  const basePlanId = String(identity.basePlanId || '');
+  const sourceProductId = String(identity.sourceProductId || '');
+  if (!relativePath || !basePlanId || !sourceProductId) return [];
+  const drafts = await listObsidianDrafts(rootDir);
+  return [...new Set(drafts
+    .filter((draft) => (
+      draft.relativePath === relativePath
+      && draft.basePlanId === basePlanId
+      && draft.sourceProductId === sourceProductId
+    ))
+    .map((draft) => draft.planId))];
 }
 
 export async function updateObsidianDraftItem(rootDir, id, planId, nextItem, expectedVersion) {

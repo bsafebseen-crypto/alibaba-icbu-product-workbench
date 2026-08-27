@@ -66,6 +66,7 @@ export function createStrictProductPreview(schemaXml, variant) {
   const preview = createProductPreview(schemaXml, {
     ...normalized,
     alibabaImages: variant.alibabaImages,
+    sellingPointBinding: variant.sellingPointBinding,
   });
   assertOnlyMutableSchemaRolesChanged(schemaXml, preview.previewXml);
   return {

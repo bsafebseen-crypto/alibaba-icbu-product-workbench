@@ -6,6 +6,7 @@ import path from 'node:path';
 
 import {
   createObsidianPublishingTask,
+  listCompletedObsidianPlanIds,
   listObsidianDrafts,
   readObsidianPublishingTask,
   updateObsidianDraftItem,
@@ -65,6 +66,7 @@ test('listObsidianDrafts returns only safe completed draft metadata newest first
   await createObsidianPublishingTask(root, {
     batchId: 'batch-1',
     relativePath: '2026-08-25/反光T恤4.md',
+    basePlanId: 'plan-1',
     sourceProductId: '1601933369105',
     items: [
       { planId: 'plan-2', fingerprint: 'secret-fingerprint', status: 'draft_created', draftProductId: '1601933441594', completedAt: '2026-08-25T10:00:00.000Z' },
@@ -88,9 +90,19 @@ test('listObsidianDrafts returns only safe completed draft metadata newest first
     },
     {
       taskId: 'older-task', batchId: 'batch-1', relativePath: '2026-08-25/反光T恤4.md', planId: 'plan-2',
+      basePlanId: 'plan-1', sourceProductId: '1601933369105',
       draftProductId: '1601933441594', completedAt: '2026-08-25T10:00:00.000Z',
     },
   ]);
   assert.equal(JSON.stringify(drafts).includes('fingerprint'), false);
-  assert.equal(JSON.stringify(drafts).includes('sourceProductId'), false);
+  assert.deepEqual(await listCompletedObsidianPlanIds(root, {
+    relativePath: '2026-08-25/反光T恤4.md',
+    basePlanId: 'plan-1',
+    sourceProductId: '1601933369105',
+  }), ['plan-2']);
+  assert.deepEqual(await listCompletedObsidianPlanIds(root, {
+    relativePath: '2026-08-25/反光T恤4.md',
+    basePlanId: 'plan-2',
+    sourceProductId: '1601933369105',
+  }), []);
 });

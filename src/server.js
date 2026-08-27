@@ -33,6 +33,7 @@ import {
 } from './obsidian-variant.js';
 import {
   createObsidianPublishingTask as defaultCreateObsidianPublishingTask,
+  listCompletedObsidianPlanIds as defaultListCompletedObsidianPlanIds,
   listObsidianDrafts as defaultListObsidianDrafts,
   readObsidianPublishingTask as defaultReadObsidianPublishingTask,
   updateObsidianDraftItem as defaultUpdateObsidianDraftItem,
@@ -49,6 +50,7 @@ import {
   createProductPreview as defaultCreateProductPreview,
 } from './schema-template.js';
 import {
+  readSellingPointBinding as defaultReadSellingPointBinding,
   saveSellingPointBinding as defaultSaveSellingPointBinding,
   summarizeSellingPointCandidates as defaultSummarizeSellingPointCandidates,
   validateSellingPointBinding as defaultValidateSellingPointBinding,
@@ -180,9 +182,12 @@ export function createServer(options = {}) {
   const createAlibabaProductDraft = options.createAlibabaProductDraft ?? defaultCreateAlibabaProductDraft;
   const getAlibabaPublishingCapability = options.getAlibabaPublishingCapability ?? defaultGetAlibabaPublishingCapability;
   const createObsidianPublishingTask = options.createObsidianPublishingTask ?? defaultCreateObsidianPublishingTask;
+  const listCompletedObsidianPlanIds = options.listCompletedObsidianPlanIds
+    ?? defaultListCompletedObsidianPlanIds;
   const listObsidianDrafts = options.listObsidianDrafts ?? defaultListObsidianDrafts;
   const readObsidianPublishingTask = options.readObsidianPublishingTask ?? defaultReadObsidianPublishingTask;
   const updateObsidianDraftItem = options.updateObsidianDraftItem ?? defaultUpdateObsidianDraftItem;
+  const readSellingPointBinding = options.readSellingPointBinding ?? defaultReadSellingPointBinding;
   const saveSellingPointBinding = options.saveSellingPointBinding ?? defaultSaveSellingPointBinding;
   const summarizeSellingPointCandidates = options.summarizeSellingPointCandidates
     ?? defaultSummarizeSellingPointCandidates;
@@ -322,19 +327,8 @@ export function createServer(options = {}) {
         const body = await readJson(request);
         try {
           const batch = await readObsidianBatch(obsidianRoot, body.relativePath);
-          const variants = createObsidianVariants(batch, body.basePlanId);
+          const allVariants = createObsidianVariants(batch, body.basePlanId);
           const schemaXml = body.sourceContext?.schemaXml || body.schemaXml;
-          const previews = variants.map((variant) => {
-            const alibabaImages = body.imagesByPlan?.[variant.planId];
-            if (!Array.isArray(alibabaImages) || alibabaImages.length !== 6) {
-              throw new Error(`${variant.planId} 必须分配并上传 6 张图片`);
-            }
-            return {
-              planId: variant.planId,
-              ...createStrictProductPreview(schemaXml, { ...variant, alibabaImages }),
-            };
-          });
-          const sessionId = crypto.randomUUID();
           const context = {
             categoryId: body.sourceContext?.categoryId,
             language: body.sourceContext?.language,
@@ -342,12 +336,61 @@ export function createServer(options = {}) {
             version: body.sourceContext?.version,
             sourceProductType: body.sourceContext?.sourceProductType,
           };
+          if (!Array.isArray(body.planIds) || !body.planIds.length) {
+            throw new Error('预览必须明确指定待办方案');
+          }
+          const requestedPlanIds = body.planIds.map((value) => String(value || ''));
+          if (new Set(requestedPlanIds).size !== requestedPlanIds.length) {
+            throw new Error('待办方案不能重复');
+          }
+          const variantsById = new Map(allVariants.map((variant) => [variant.planId, variant]));
+          if (requestedPlanIds.some((planId) => !variantsById.has(planId))) {
+            throw new Error('待办方案不属于当前批次');
+          }
+          const completedPlanIds = await listCompletedObsidianPlanIds(rootDir, {
+            relativePath: body.relativePath,
+            basePlanId: body.basePlanId,
+            sourceProductId: body.sourceContext?.sourceProductId,
+          });
+          const repeatedPlanId = requestedPlanIds.find((planId) => completedPlanIds.includes(planId));
+          if (repeatedPlanId) {
+            throw Object.assign(new Error(`${repeatedPlanId} 已有草稿，禁止重复准备`), { status: 409 });
+          }
+          const storedBinding = await readSellingPointBinding(rootDir, context);
+          if (!storedBinding) {
+            throw Object.assign(new Error('卖点字段尚未校准，请先完成只读诊断并确认'), { status: 409 });
+          }
+          const sellingPointBinding = validateSellingPointBinding(schemaXml, storedBinding);
+          const submittedBinding = body.sellingPointBinding;
+          if (!submittedBinding
+            || submittedBinding.fieldId !== sellingPointBinding.fieldId
+            || submittedBinding.structureType !== sellingPointBinding.structureType
+            || JSON.stringify(submittedBinding.carrierPath) !== JSON.stringify(sellingPointBinding.carrierPath)) {
+            throw Object.assign(new Error('卖点字段绑定已经变化，请重新校准'), { status: 409 });
+          }
+          const variants = requestedPlanIds.map((planId) => variantsById.get(planId));
+          const previews = variants.map((variant) => {
+            const alibabaImages = body.imagesByPlan?.[variant.planId];
+            if (!Array.isArray(alibabaImages) || alibabaImages.length !== 6) {
+              throw new Error(`${variant.planId} 必须分配并上传 6 张图片`);
+            }
+            return {
+              planId: variant.planId,
+              ...createStrictProductPreview(schemaXml, {
+                ...variant,
+                alibabaImages,
+                sellingPointBinding,
+              }),
+            };
+          });
+          const sessionId = crypto.randomUUID();
           const task = await createObsidianPublishingTask(rootDir, {
             batchId: batch.batchId,
             relativePath: body.relativePath,
             basePlanId: body.basePlanId,
             sourceProductId: body.sourceContext?.sourceProductId,
             context,
+            sellingPointBinding,
             items: previews.map((preview) => ({
               planId: preview.planId,
               fingerprint: preview.fingerprint,
@@ -404,7 +447,15 @@ export function createServer(options = {}) {
           error.status = error.status || 502;
           throw error;
         }
-        const comparison = compareDraftToPlan(plan, analyzeProductSchema(draft.schemaXml));
+        const storedBinding = task.sellingPointBinding
+          || await readSellingPointBinding(rootDir, task.context);
+        if (!storedBinding) {
+          throw Object.assign(new Error('任务缺少已确认的卖点字段绑定，不能判定草稿一致'), { status: 409 });
+        }
+        const sellingPointBinding = validateSellingPointBinding(draft.schemaXml, storedBinding);
+        const comparison = compareDraftToPlan(plan, analyzeProductSchema(draft.schemaXml, {
+          sellingPointBinding,
+        }));
         sendJson(response, 200, {
           taskId: task.id,
           planId,

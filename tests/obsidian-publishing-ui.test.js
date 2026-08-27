@@ -10,6 +10,7 @@ import {
   imageFileKey,
   imageContentKey,
   invalidatePreviewState,
+  pendingVariants,
   remainingPlans,
   resolveUploadedImages,
   uniqueAssignmentImages,
@@ -28,7 +29,9 @@ test('createObsidianPublishingState starts without persisted product data', () =
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
+    allVariants: [],
     variants: [],
+    completedDrafts: [],
     mainImages: [null, null, null, null],
     marketingImages: [],
     fixedImages: [],
@@ -94,6 +97,13 @@ test('remainingPlans excludes any selected base plan and preserves source order'
 
 test('remainingPlans rejects an unknown base plan', () => {
   assert.throws(() => remainingPlans(batch(), 'missing'), /请选择批次中的一个母商品方案/);
+});
+
+test('pendingVariants excludes completed plans without changing source order', () => {
+  const variants = ['plan-2', 'plan-3', 'plan-4', 'plan-5'].map((id) => ({ id }));
+  assert.deepEqual(pendingVariants(variants, ['plan-2']).map(({ id }) => id), [
+    'plan-3', 'plan-4', 'plan-5',
+  ]);
 });
 
 test('resolveUploadedImages maps one main and five auxiliary images in selection order', () => {
@@ -196,12 +206,19 @@ test('buildPreviewRequest preserves source product publishing context', () => {
     sourceProductType: 'sourcing',
     schemaXml: '<schema />',
   };
+  state.sellingPointBinding = {
+    fieldId: 'sellingPoints', carrierPath: ['value'], structureType: 'single-text',
+    categoryId: '301504', language: 'en_US', version: '1',
+  };
+  state.variants = [{ id: 'plan-2' }, { id: 'plan-3' }];
   const imagesByPlan = { 'plan-2': [{ fileId: 'file-2', url: 'https://img/2.jpg' }] };
 
   assert.deepEqual(buildPreviewRequest(state, imagesByPlan), {
     relativePath: '2026-08-25/反光T恤4.md',
     basePlanId: 'plan-1',
     sourceContext: state.sourceContext,
+    planIds: ['plan-2', 'plan-3'],
+    sellingPointBinding: state.sellingPointBinding,
     imagesByPlan,
   });
 });

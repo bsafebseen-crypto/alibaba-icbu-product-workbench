@@ -9,7 +9,9 @@ export function createObsidianPublishingState() {
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
+    allVariants: [],
     variants: [],
+    completedDrafts: [],
     mainImages: [null, null, null, null],
     marketingImages: [],
     fixedImages: [],
@@ -38,7 +40,7 @@ export async function imageContentKey(file, cryptoRef = globalThis.crypto) {
 
 export function buildSharedImageAssignments(state) {
   return assignSharedProductImages({
-    variants: state.variants,
+    variants: state.allVariants.length ? state.allVariants : state.variants,
     mainImages: state.mainImages,
     marketingImages: state.marketingImages,
     fixedImages: state.fixedImages,
@@ -116,6 +118,11 @@ export function remainingPlans(batch, basePlanId) {
   return batch.plans.filter((plan) => plan.id !== basePlanId);
 }
 
+export function pendingVariants(variants = [], completedPlanIds = []) {
+  const completed = new Set(completedPlanIds.map((value) => String(value)));
+  return variants.filter((variant) => !completed.has(String(variant?.id || variant?.planId || '')));
+}
+
 export function formatDraftVerification(result = {}) {
   const trace = result.traceId ? `追踪号 ${result.traceId}` : '无追踪号';
   if (result.comparison?.exactMatch) {
@@ -146,6 +153,8 @@ export function buildPreviewRequest(state, imagesByPlan) {
     relativePath: state.batch.source.relativePath,
     basePlanId: state.basePlanId,
     sourceContext: state.sourceContext,
+    planIds: state.variants.map((variant) => variant.id),
+    sellingPointBinding: state.sellingPointBinding,
     imagesByPlan,
   };
 }
@@ -213,7 +222,9 @@ export function initObsidianPublishing({
     state.sourceContext = null;
     state.sellingPointDiagnosis = null;
     state.sellingPointBinding = null;
+    state.allVariants = [];
     state.variants = [];
+    state.completedDrafts = [];
     state.mainImages = [null, null, null, null];
     state.marketingImages = [];
     state.filesByPlan = {};
@@ -316,7 +327,8 @@ export function initObsidianPublishing({
 
   function renderVariants() {
     elements.variants.replaceChildren();
-    for (const [index, variant] of state.variants.entries()) {
+    for (const [index, variant] of state.allVariants.entries()) {
+      const completed = state.completedDrafts.find((draft) => draft.planId === variant.id);
       const card = documentRef.createElement('article');
       card.className = 'obsidian-variant-card';
       card.dataset.planId = variant.id;
@@ -330,7 +342,7 @@ export function initObsidianPublishing({
       copy.append(title, detail);
       const status = documentRef.createElement('span');
       status.className = 'obsidian-variant-status';
-      status.textContent = '待准备共享图片';
+      status.textContent = completed ? `草稿 ID ${completed.draftProductId}` : '待准备共享图片';
       heading.append(copy, status);
 
       const content = documentRef.createElement('details');
@@ -339,13 +351,16 @@ export function initObsidianPublishing({
       const description = documentRef.createElement('p');
       description.textContent = variant.sellingPoints;
       content.append(summary, description);
-      const draftButton = documentRef.createElement('button');
-      draftButton.className = 'button obsidian-draft-button';
-      draftButton.type = 'button';
-      draftButton.dataset.planId = variant.id;
-      draftButton.textContent = '确认并创建此商品草稿';
-      draftButton.disabled = true;
-      card.append(heading, content, draftButton);
+      card.append(heading, content);
+      if (!completed) {
+        const draftButton = documentRef.createElement('button');
+        draftButton.className = 'button obsidian-draft-button';
+        draftButton.type = 'button';
+        draftButton.dataset.planId = variant.id;
+        draftButton.textContent = '确认并创建此商品草稿';
+        draftButton.disabled = true;
+        card.append(draftButton);
+      }
       elements.variants.append(card);
     }
   }
@@ -374,7 +389,9 @@ export function initObsidianPublishing({
         row.append(title, names);
         elements.assignmentSummary.append(row);
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(assignment.planId)}"]`);
-        text(card?.querySelector('.obsidian-variant-status'), '6 张图片已自动分配');
+        if (!state.completedDrafts.some((draft) => draft.planId === assignment.planId)) {
+          text(card?.querySelector('.obsidian-variant-status'), '6 张图片已自动分配');
+        }
       }
       elements.uploadImages.disabled = false;
       setPreviewStatus('四套图片已自动分配；上传前会先检查本机图片银行缓存。');
@@ -487,7 +504,18 @@ export function initObsidianPublishing({
         method: 'POST',
         body: JSON.stringify({ config: getAlibabaConfig(), productId: state.sourceProductId }),
       });
-      state.variants = remainingPlans(state.batch, state.basePlanId);
+      await refreshSavedDrafts();
+      state.allVariants = remainingPlans(state.batch, state.basePlanId);
+      state.completedDrafts = state.savedDrafts.filter((draft) => (
+        draft.relativePath === state.batch.source.relativePath
+        && draft.basePlanId === state.basePlanId
+        && draft.sourceProductId === state.sourceProductId
+        && state.allVariants.some((variant) => variant.id === draft.planId)
+      ));
+      state.variants = pendingVariants(
+        state.allVariants,
+        state.completedDrafts.map((draft) => draft.planId),
+      );
       state.filesByPlan = {};
       state.uploads = {};
       invalidatePreviewState(state);
@@ -501,7 +529,7 @@ export function initObsidianPublishing({
       elements.diagnoseSellingPoints.disabled = false;
       text(
         elements.sourceStatus,
-        `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；未修改商品。`,
+        `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；已完成 ${state.completedDrafts.length} 个，待办 ${state.variants.length} 个；未修改商品。`,
       );
       renderSharedAssignments();
     } catch (error) {
