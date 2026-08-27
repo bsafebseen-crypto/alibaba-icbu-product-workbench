@@ -58,6 +58,7 @@ import {
   savePhotobankCacheEntry as defaultSavePhotobankCacheEntry,
 } from './photobank-cache.js';
 import {
+  loadFixedImageForUpload as defaultLoadFixedImageForUpload,
   readFixedImageConfig as defaultReadFixedImageConfig,
   saveFixedImageConfig as defaultSaveFixedImageConfig,
 } from './fixed-image-config.js';
@@ -88,6 +89,7 @@ async function serveStatic(rootDir, pathname, response) {
     '/similar-product-ui.js': ['similar-product-ui.js', 'text/javascript; charset=utf-8'],
     '/product-pool.js': ['product-pool.js', 'text/javascript; charset=utf-8'],
     '/obsidian-publishing.js': ['obsidian-publishing.js', 'text/javascript; charset=utf-8'],
+    '/shared-image-assignment.js': ['shared-image-assignment.js', 'text/javascript; charset=utf-8'],
   };
   const entry = files[pathname];
   if (!entry) return false;
@@ -190,6 +192,7 @@ export function createServer(options = {}) {
   const savePhotobankCacheEntry = options.savePhotobankCacheEntry ?? defaultSavePhotobankCacheEntry;
   const readFixedImageConfig = options.readFixedImageConfig ?? defaultReadFixedImageConfig;
   const saveFixedImageConfig = options.saveFixedImageConfig ?? defaultSaveFixedImageConfig;
+  const loadFixedImageForUpload = options.loadFixedImageForUpload ?? defaultLoadFixedImageForUpload;
   const previewSessions = new Map();
 
   return http.createServer(async (request, response) => {
@@ -287,6 +290,31 @@ export function createServer(options = {}) {
           throw Object.assign(new Error('保存固定副图前必须明确确认'), { status: 400 });
         }
         sendJson(response, 200, await saveFixedImageConfig(rootDir, { slots: body.slots }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/fixed-images/upload') {
+        const body = await readJson(request);
+        if (body.confirmed !== true) {
+          throw Object.assign(new Error('上传固定副图前必须明确确认'), { status: 400 });
+        }
+        const image = await loadFixedImageForUpload(rootDir, body.sha256);
+        const result = await uploadAlibabaPhoto(body.config, {
+          fileName: image.fileName,
+          mimeType: image.mimeType,
+          imageBytes: image.imageBytes,
+          groupId: body.groupId,
+        });
+        await savePhotobankCacheEntry(rootDir, {
+          sha256: image.sha256,
+          fileName: image.fileName,
+          size: image.size,
+          mimeType: image.mimeType,
+          fileId: result.fileId,
+          photobankUrl: result.photobankUrl,
+          source: 'upload',
+        });
+        sendJson(response, 200, result);
         return;
       }
 

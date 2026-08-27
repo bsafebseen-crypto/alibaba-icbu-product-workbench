@@ -3,13 +3,16 @@ import assert from 'node:assert/strict';
 
 import {
   buildPreviewRequest,
+  buildSharedImageAssignments,
   commonSellingPointCandidate,
   createObsidianPublishingState,
   formatDraftVerification,
   imageFileKey,
+  imageContentKey,
   invalidatePreviewState,
   remainingPlans,
   resolveUploadedImages,
+  uniqueAssignmentImages,
 } from '../public/obsidian-publishing.js';
 
 function batch() {
@@ -26,6 +29,9 @@ test('createObsidianPublishingState starts without persisted product data', () =
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
     variants: [],
+    mainImages: [null, null, null, null],
+    marketingImages: [],
+    fixedImages: [],
     filesByPlan: {},
     uploads: {},
     previews: [],
@@ -36,6 +42,31 @@ test('createObsidianPublishingState starts without persisted product data', () =
     loading: false,
     error: '',
   });
+});
+
+test('imageContentKey hashes file bytes instead of reusable file metadata', async () => {
+  const first = { arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer };
+  const second = { arrayBuffer: async () => new Uint8Array([1, 2, 4]).buffer };
+  assert.notEqual(await imageContentKey(first), await imageContentKey(second));
+});
+
+test('buildSharedImageAssignments rotates shared images and uniqueAssignmentImages deduplicates them', () => {
+  const state = createObsidianPublishingState();
+  state.variants = ['plan-2', 'plan-3', 'plan-4', 'plan-5'].map((id) => ({ id }));
+  const make = (character, fileName) => ({
+    sha256: character.repeat(64), fileName: fileName || `${character}.jpg`,
+    size: 10, mimeType: 'image/jpeg',
+  });
+  state.mainImages = ['0', '1', '2', '3'].map((value) => make(value, `main-${value}.jpg`));
+  state.marketingImages = ['a', 'b', 'c'].map((value) => make(value));
+  state.fixedImages = [make('e', '2.jpg'), make('f', '证书主图.jpg')];
+
+  const assignments = buildSharedImageAssignments(state);
+
+  assert.deepEqual(assignments[1].files.map((image) => image.fileName), [
+    'main-1.jpg', 'b.jpg', 'c.jpg', 'a.jpg', '2.jpg', '证书主图.jpg',
+  ]);
+  assert.equal(uniqueAssignmentImages(assignments).length, 9);
 });
 
 test('commonSellingPointCandidate requires one matching source and draft carrier', () => {

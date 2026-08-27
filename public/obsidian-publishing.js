@@ -1,3 +1,5 @@
+import { assignSharedProductImages } from './shared-image-assignment.js';
+
 export function createObsidianPublishingState() {
   return {
     batches: [],
@@ -8,6 +10,9 @@ export function createObsidianPublishingState() {
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
     variants: [],
+    mainImages: [null, null, null, null],
+    marketingImages: [],
+    fixedImages: [],
     filesByPlan: {},
     uploads: {},
     previews: [],
@@ -22,6 +27,28 @@ export function createObsidianPublishingState() {
 
 export function imageFileKey(file) {
   return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+export async function imageContentKey(file, cryptoRef = globalThis.crypto) {
+  const digest = await cryptoRef.subtle.digest('SHA-256', await file.arrayBuffer());
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+export function buildSharedImageAssignments(state) {
+  return assignSharedProductImages({
+    variants: state.variants,
+    mainImages: state.mainImages,
+    marketingImages: state.marketingImages,
+    fixedImages: state.fixedImages,
+  });
+}
+
+export function uniqueAssignmentImages(assignments = []) {
+  return [...new Map(assignments
+    .flatMap((assignment) => assignment.files || [])
+    .map((image) => [image.sha256, image])).values()];
 }
 
 export function commonSellingPointCandidate(diagnosis = {}) {
@@ -60,6 +87,19 @@ export function resolveUploadedImages(variants, filesByPlan, uploads) {
     });
     return [variant.id, images];
   }));
+}
+
+export function resolveSharedUploadedImages(assignments, uploads) {
+  return Object.fromEntries(assignments.map((assignment) => [
+    assignment.planId,
+    assignment.files.map((image) => {
+      const upload = uploads[image.sha256];
+      if (!upload?.fileId || !upload?.photobankUrl) {
+        throw new Error(`${image.fileName} 尚未上传到图片银行`);
+      }
+      return { fileId: upload.fileId, url: upload.photobankUrl };
+    }),
+  ]));
 }
 
 export function invalidatePreviewState(state) {
@@ -140,6 +180,17 @@ export function initObsidianPublishing({
     diagnoseSellingPoints: documentRef.getElementById('obsidian-diagnose-selling-points'),
     confirmSellingPoint: documentRef.getElementById('obsidian-confirm-selling-point'),
     sellingPointStatus: documentRef.getElementById('obsidian-selling-point-status'),
+    mainImageInputs: Array.from({ length: 4 }, (_, index) => (
+      documentRef.getElementById(`obsidian-main-image-${index + 1}`)
+    )),
+    marketingImages: documentRef.getElementById('obsidian-marketing-images'),
+    fixedImagePaths: [
+      documentRef.getElementById('obsidian-fixed-image-1'),
+      documentRef.getElementById('obsidian-fixed-image-2'),
+    ],
+    saveFixedImages: documentRef.getElementById('obsidian-save-fixed-images'),
+    fixedImageStatus: documentRef.getElementById('obsidian-fixed-image-status'),
+    assignmentSummary: documentRef.getElementById('obsidian-assignment-summary'),
     variants: documentRef.getElementById('obsidian-variant-list'),
     uploadImages: documentRef.getElementById('obsidian-upload-images'),
     generatePreviews: documentRef.getElementById('obsidian-generate-previews'),
@@ -163,6 +214,8 @@ export function initObsidianPublishing({
     state.sellingPointDiagnosis = null;
     state.sellingPointBinding = null;
     state.variants = [];
+    state.mainImages = [null, null, null, null];
+    state.marketingImages = [];
     state.filesByPlan = {};
     state.uploads = {};
     invalidatePreviewState(state);
@@ -277,19 +330,8 @@ export function initObsidianPublishing({
       copy.append(title, detail);
       const status = documentRef.createElement('span');
       status.className = 'obsidian-variant-status';
-      status.textContent = '待选 6 张图片';
+      status.textContent = '待准备共享图片';
       heading.append(copy, status);
-
-      const label = documentRef.createElement('label');
-      label.className = 'obsidian-image-picker';
-      const input = documentRef.createElement('input');
-      input.type = 'file';
-      input.accept = 'image/jpeg,image/png,image/webp';
-      input.multiple = true;
-      input.dataset.planId = variant.id;
-      const instruction = documentRef.createElement('span');
-      instruction.textContent = '选择 6 张：第 1 张作为主图，后 5 张作为副图';
-      label.append(input, instruction);
 
       const content = documentRef.createElement('details');
       const summary = documentRef.createElement('summary');
@@ -303,8 +345,75 @@ export function initObsidianPublishing({
       draftButton.dataset.planId = variant.id;
       draftButton.textContent = '确认并创建此商品草稿';
       draftButton.disabled = true;
-      card.append(heading, label, content, draftButton);
+      card.append(heading, content, draftButton);
       elements.variants.append(card);
+    }
+  }
+
+  function invalidateSharedImagePreview(message = '共享图片已经变化，请重新生成完整预览。') {
+    invalidatePreviewState(state);
+    elements.generatePreviews.disabled = true;
+    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((button) => {
+      button.disabled = true;
+      button.textContent = '请重新生成完整预览';
+    });
+    text(elements.draftStatus, message);
+  }
+
+  function renderSharedAssignments() {
+    elements.assignmentSummary.replaceChildren();
+    try {
+      const assignments = buildSharedImageAssignments(state);
+      for (const assignment of assignments) {
+        const row = documentRef.createElement('div');
+        row.className = 'obsidian-assignment-row';
+        const title = documentRef.createElement('strong');
+        title.textContent = assignment.planId;
+        const names = documentRef.createElement('span');
+        names.textContent = assignment.files.map((image) => image.fileName).join(' → ');
+        row.append(title, names);
+        elements.assignmentSummary.append(row);
+        const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(assignment.planId)}"]`);
+        text(card?.querySelector('.obsidian-variant-status'), '6 张图片已自动分配');
+      }
+      elements.uploadImages.disabled = false;
+      setPreviewStatus('四套图片已自动分配；上传前会先检查本机图片银行缓存。');
+      return assignments;
+    } catch (error) {
+      const message = documentRef.createElement('p');
+      message.textContent = error.message;
+      elements.assignmentSummary.append(message);
+      elements.uploadImages.disabled = true;
+      setPreviewStatus(error.message);
+      return [];
+    }
+  }
+
+  async function describeBrowserFile(file) {
+    return {
+      sha256: await imageContentKey(file),
+      fileName: file.name,
+      size: file.size,
+      mimeType: file.type,
+      file,
+    };
+  }
+
+  async function loadFixedImages() {
+    try {
+      const result = await requestJson('/api/obsidian/fixed-images');
+      state.fixedImages = (result.slots || []).filter((slot) => slot.ready);
+      result.slots?.forEach((slot, index) => {
+        if (elements.fixedImagePaths[index]) elements.fixedImagePaths[index].value = slot.filePath || '';
+      });
+      text(
+        elements.fixedImageStatus,
+        state.fixedImages.length === 2 ? '两张固定副图已就绪。' : '固定图不存在或内容已变化，请重新确认。',
+      );
+      renderSharedAssignments();
+    } catch (error) {
+      state.fixedImages = [];
+      text(elements.fixedImageStatus, error.message);
     }
   }
 
@@ -394,7 +503,7 @@ export function initObsidianPublishing({
         elements.sourceStatus,
         `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；未修改商品。`,
       );
-      setPreviewStatus('请为每个类似品选择 6 张图片。');
+      renderSharedAssignments();
     } catch (error) {
       state.error = error.message;
       text(elements.sourceStatus, error.message);
@@ -461,58 +570,105 @@ export function initObsidianPublishing({
       elements.confirmSellingPoint.disabled = false;
     }
   });
-  elements.variants.addEventListener('change', (event) => {
-    const planId = event.target.dataset?.planId;
-    if (!planId || event.target.type !== 'file') return;
-    const files = [...event.target.files];
-    state.filesByPlan[planId] = files;
-    invalidatePreviewState(state);
-    elements.generatePreviews.disabled = true;
-    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((draftButton) => {
-      draftButton.disabled = true;
-      draftButton.textContent = '请重新生成完整预览';
+  elements.mainImageInputs.forEach((input, index) => {
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      state.mainImages[index] = file ? await describeBrowserFile(file) : null;
+      invalidateSharedImagePreview();
+      renderSharedAssignments();
     });
-    text(elements.draftStatus, '图片已变化，旧预览和草稿权限已失效。');
-    const card = event.target.closest('.obsidian-variant-card');
-    const status = card?.querySelector('.obsidian-variant-status');
-    text(status, files.length === 6 ? '6 张已选择 · 待上传' : `已选择 ${files.length} 张 · 必须为 6 张`);
-    elements.uploadImages.disabled = !state.variants.every((variant) => (
-      state.filesByPlan[variant.id]?.length === 6
-    ));
+  });
+
+  elements.marketingImages.addEventListener('change', async () => {
+    state.marketingImages = await Promise.all(
+      [...(elements.marketingImages.files || [])].map(describeBrowserFile),
+    );
+    invalidateSharedImagePreview();
+    renderSharedAssignments();
+  });
+
+  elements.saveFixedImages.addEventListener('click', async () => {
+    const paths = elements.fixedImagePaths.map((input) => input.value.trim());
+    if (paths.some((filePath) => !filePath)) {
+      text(elements.fixedImageStatus, '请填写两张固定副图的完整本机路径。');
+      return;
+    }
+    if (!windowRef.confirm('确认保存这两张固定副图的本机路径和内容指纹？\n\n此操作只写入本机配置，不上传图片、不修改商品。')) return;
+    elements.saveFixedImages.disabled = true;
+    try {
+      const result = await requestJson('/api/obsidian/fixed-images', {
+        method: 'POST',
+        body: JSON.stringify({
+          confirmed: true,
+          slots: [
+            { name: '通用图', filePath: paths[0] },
+            { name: '证书图', filePath: paths[1] },
+          ],
+        }),
+      });
+      state.fixedImages = result.slots.filter((slot) => slot.ready);
+      invalidateSharedImagePreview('固定副图已经更新，请重新生成完整预览。');
+      renderSharedAssignments();
+      text(elements.fixedImageStatus, '两张固定副图已保存并校验，后续批次会自动复用。');
+    } catch (error) {
+      text(elements.fixedImageStatus, error.message);
+    } finally {
+      elements.saveFixedImages.disabled = false;
+    }
   });
   elements.uploadImages.addEventListener('click', async () => {
-    let selected;
+    let assignments;
     try {
-      selected = state.variants.flatMap((variant) => {
-        const files = state.filesByPlan[variant.id] || [];
-        if (files.length !== 6) throw new Error(`${variant.id} 必须选择 6 张图片`);
-        return files;
-      });
+      assignments = buildSharedImageAssignments(state);
     } catch (error) {
       setPreviewStatus(error.message, 'error');
       return;
     }
-    const unique = [...new Map(selected.map((file) => [imageFileKey(file), file])).values()];
-    const pending = unique.filter((file) => !state.uploads[imageFileKey(file)]);
+    const unique = uniqueAssignmentImages(assignments);
+    try {
+      const cached = await requestJson('/api/alibaba/photobank/cache/resolve', {
+        method: 'POST',
+        body: JSON.stringify({ images: unique.map(({ sha256 }) => ({ sha256 })) }),
+      });
+      state.uploads = { ...state.uploads, ...(cached.uploads || {}) };
+    } catch (error) {
+      setPreviewStatus(`读取本机图片银行缓存失败：${error.message}`, 'error');
+      return;
+    }
+    const pending = unique.filter((image) => !state.uploads[image.sha256]);
     if (pending.length && !windowRef.confirm(
       `将 ${pending.length} 张图片上传到当前店铺的阿里图片银行。\n\n这不会创建、修改或发布商品。是否继续？`,
     )) return;
 
     elements.uploadImages.disabled = true;
     try {
-      for (const [index, file] of pending.entries()) {
-        setPreviewStatus(`正在上传 ${index + 1} / ${pending.length}：${file.name}`);
-        const upload = await requestJson('/api/alibaba/photobank/upload', {
-          method: 'POST',
-          body: JSON.stringify({
-            config: getAlibabaConfig(),
-            groupId: getPhotobankGroupId(),
-            image: { fileName: file.name, dataUrl: await fileToDataUrl(file) },
-          }),
-        });
-        state.uploads[imageFileKey(file)] = upload;
+      for (const [index, image] of pending.entries()) {
+        setPreviewStatus(`正在上传 ${index + 1} / ${pending.length}：${image.fileName}`);
+        const common = {
+          config: getAlibabaConfig(),
+          groupId: getPhotobankGroupId(),
+          confirmed: true,
+          sha256: image.sha256,
+        };
+        const upload = image.file
+          ? await requestJson('/api/alibaba/photobank/upload', {
+            method: 'POST',
+            body: JSON.stringify({
+              ...common,
+              image: {
+                fileName: image.fileName,
+                dataUrl: await fileToDataUrl(image.file),
+                sha256: image.sha256,
+              },
+            }),
+          })
+          : await requestJson('/api/obsidian/fixed-images/upload', {
+            method: 'POST',
+            body: JSON.stringify(common),
+          });
+        state.uploads[image.sha256] = upload;
       }
-      resolveUploadedImages(state.variants, state.filesByPlan, state.uploads);
+      resolveSharedUploadedImages(assignments, state.uploads);
       elements.generatePreviews.disabled = false;
       setPreviewStatus(`${unique.length} 张实际使用图片已在图片银行就绪；尚未创建商品。`, 'success');
       for (const variant of state.variants) {
@@ -529,7 +685,8 @@ export function initObsidianPublishing({
     elements.generatePreviews.disabled = true;
     setPreviewStatus('正在生成四份完整本地 Schema；不会提交商品。');
     try {
-      const imagesByPlan = resolveUploadedImages(state.variants, state.filesByPlan, state.uploads);
+      const assignments = buildSharedImageAssignments(state);
+      const imagesByPlan = resolveSharedUploadedImages(assignments, state.uploads);
       const result = await requestJson('/api/obsidian/preview', {
         method: 'POST',
         body: JSON.stringify(buildPreviewRequest(state, imagesByPlan)),
@@ -632,6 +789,7 @@ export function initObsidianPublishing({
 
   renderBatchList();
   renderPlans();
+  loadFixedImages();
   refreshSavedDrafts();
   return { state, refreshBatches };
 }

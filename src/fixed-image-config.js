@@ -77,3 +77,11 @@ export async function readFixedImageConfig(rootDir) {
   }));
   return { slots };
 }
+
+export async function loadFixedImageForUpload(rootDir, sha256) {
+  const requested = String(sha256 || '').trim().toLowerCase();
+  const current = await readFixedImageConfig(rootDir);
+  const slot = current.slots.find((candidate) => candidate.ready && candidate.sha256 === requested);
+  if (!slot) throw new Error('固定副图不存在、内容已变化或尚未就绪');
+  return { ...slot, imageBytes: await readFile(slot.filePath) };
+}

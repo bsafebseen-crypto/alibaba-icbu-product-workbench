@@ -632,6 +632,48 @@ test('fixed image routes require confirmation and return revalidated safe metada
   });
 });
 
+test('POST /api/obsidian/fixed-images/upload uploads one configured file and caches its digest', async () => {
+  let uploaded;
+  await withServer(async (baseUrl, rootDir) => {
+    const first = path.join(rootDir, '2.jpg');
+    const second = path.join(rootDir, '证书主图.jpg');
+    await writeFile(first, Buffer.from([1, 2, 3]));
+    await writeFile(second, Buffer.from([4, 5, 6]));
+    const configured = await (await fetch(`${baseUrl}/api/obsidian/fixed-images`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        confirmed: true,
+        slots: [{ name: '通用图', filePath: first }, { name: '证书图', filePath: second }],
+      }),
+    })).json();
+    const target = configured.slots[0];
+    const response = await fetch(`${baseUrl}/api/obsidian/fixed-images/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key', appSecret: 'secret', accessToken: 'token' },
+        sha256: target.sha256,
+        confirmed: true,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(uploaded.fileName, '2.jpg');
+    assert.deepEqual([...uploaded.imageBytes], [1, 2, 3]);
+    const resolved = await (await fetch(`${baseUrl}/api/alibaba/photobank/cache/resolve`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: [{ sha256: target.sha256 }] }),
+    })).json();
+    assert.equal(resolved.uploads[target.sha256].fileId, 'fixed-file');
+  }, {
+    uploadAlibabaPhoto: async (_config, image) => {
+      uploaded = image;
+      return {
+        fileName: image.fileName, fileId: 'fixed-file',
+        photobankUrl: 'https://img.example.com/fixed.jpg', requestId: 'fixed-request',
+      };
+    },
+  });
+});
+
 test('POST /api/obsidian/selling-points/diagnose returns only safe field structure summaries', async () => {
   const sourceSchema = '<itemSchema><field id="textDesc" name="商品卖点"><value>Source summary</value></field><field id="detail"><value>private product detail</value></field></itemSchema>';
   const draftSchema = '<itemSchema><field id="textDesc" name="商品卖点"><value>Draft summary</value></field></itemSchema>';
