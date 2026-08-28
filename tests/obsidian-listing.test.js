@@ -19,7 +19,9 @@ function validPayload() {
     plans: Array.from({ length: 5 }, (_, planIndex) => ({
       id: `plan-${planIndex + 1}`,
       title: `Reflective Safety Vest Plan ${planIndex + 1}`,
-      sellingPoints: `Selling points for plan ${planIndex + 1}`,
+      sellingPoints: Array.from({ length: 5 }, (_, pointIndex) => (
+        `Plan ${planIndex + 1} Point ${pointIndex + 1}: Verified selling point ${pointIndex + 1}.`
+      )).join('\n'),
       faqs: Array.from({ length: 5 }, (_, faqIndex) => ({
         question: `Question ${faqIndex + 1}?`,
         answer: `Answer ${faqIndex + 1}.`,
@@ -36,18 +38,25 @@ function markdownFor(payload) {
   const readablePlans = payload.plans.flatMap((plan, planIndex) => [
     `## 方案 ${planIndex + 1}：测试方案`,
     '',
+    `- **Title:** ${plan.title}`,
+    '',
+    '### 10 Custom Attributes',
+    '',
+    ...plan.customAttributes.map(({ name, value }, index) => `${index + 1}. ${name}: ${value}`),
+    '',
+    '### 5 FAQs',
+    '',
+    ...plan.faqs.flatMap(({ question, answer }, index) => [
+      `${index + 1}. **Q:** ${question}`,
+      `   **A:** ${answer}`,
+      `   **埋入关键词:** keyword ${index + 1}`,
+    ]),
+    '',
     '<!-- selling-points:start -->',
-    '#### 卖点策略说明',
-    '',
-    '测试说明。',
-    '',
     '#### Selling Points',
     '',
-    ...Array.from({ length: 5 }, (_, pointIndex) => (
-      `• Plan ${planIndex + 1} Point ${pointIndex + 1}: Verified selling point ${pointIndex + 1}.`
-    )),
+    ...plan.sellingPoints.split('\n').map((point) => `• ${point}`),
     '<!-- selling-points:end -->',
-    '',
   ]);
   return [
     '# Human-readable listing',
@@ -61,8 +70,54 @@ function markdownFor(payload) {
   ].join('\n');
 }
 
+function bodyMarkdown({ bullet = '•', missing = '' } = {}) {
+  const plans = Array.from({ length: 5 }, (_, planIndex) => {
+    const number = planIndex + 1;
+    const attributes = Array.from({ length: 10 }, (_, index) => (
+      `${index + 1}. Attribute ${index + 1}: Plan ${number} Value ${index + 1}`
+    ));
+    const faqs = Array.from({ length: 5 }, (_, index) => [
+      `${index + 1}. **Q:** Plan ${number} Question ${index + 1}?`,
+      `   **A:** Plan ${number} Answer ${index + 1}.`,
+      `   **埋入关键词:** keyword ${index + 1}`,
+    ].join('\n'));
+    const points = Array.from({ length: 5 }, (_, index) => (
+      `${bullet} Plan ${number} Point ${index + 1}: Body selling point ${index + 1}.`
+    ));
+    return [
+      `## 方案 ${number}：正文方案`, '',
+      missing === `title-${number}` ? '' : `- **Title:** Reflective Product Body Plan ${number}`, '',
+      '### 10 Custom Attributes', '', ...attributes, '',
+      '### 5 FAQs', '', ...faqs, '',
+      '#### Selling Points', '', ...points,
+    ].join('\n');
+  });
+  return ['# Reflective Product 国际站发品方案', '', ...plans].join('\n');
+}
+
 test('extractListingPayload reads a versioned five-plan machine block', () => {
   assert.deepEqual(extractListingPayload(markdownFor(validPayload())), validPayload());
+});
+
+test('readObsidianBatch parses five complete plans without a machine block', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-'));
+  await writeFile(path.join(root, 'body.md'), bodyMarkdown(), 'utf8');
+  const batch = await readObsidianBatch(root, 'body.md');
+  assert.equal(batch.batchName, 'Reflective Product');
+  assert.equal(batch.plans.length, 5);
+  assert.equal(batch.plans[3].title, 'Reflective Product Body Plan 4');
+  assert.equal(batch.plans[3].customAttributes.length, 10);
+  assert.equal(batch.plans[3].faqs.length, 5);
+  assert.equal(batch.plans[3].sellingPoints.split('\n').length, 5);
+});
+
+test('readObsidianBatch strips all supported Obsidian selling-point bullets', async () => {
+  for (const bullet of ['•', '-', '*']) {
+    const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-bullets-'));
+    await writeFile(path.join(root, 'body.md'), bodyMarkdown({ bullet }), 'utf8');
+    const batch = await readObsidianBatch(root, 'body.md');
+    assert.doesNotMatch(batch.plans[0].sellingPoints, /^[•*-]/m);
+  }
 });
 
 test('extractListingPayload rejects duplicate machine blocks', () => {
@@ -123,11 +178,12 @@ test('listObsidianBatches finds nested Markdown and reports invalid files safely
   assert.equal(batches.length, 2);
   assert.deepEqual(batches.map(({ relativePath }) => relativePath), ['broken.md', 'vests/valid.md']);
   assert.equal(batches[0].valid, false);
-  assert.match(batches[0].error, /缺少阿里发品机器数据块/);
+  assert.match(batches[0].error, /方案编号必须恰好为 1、2、3、4、5/);
   assert.deepEqual(
-    { valid: batches[1].valid, batchId: batches[1].batchId, batchName: batches[1].batchName },
-    { valid: true, batchId: 'reflective-vest-001', batchName: 'Reflective Vest' },
+    { valid: batches[1].valid, batchName: batches[1].batchName },
+    { valid: true, batchName: 'Human-readable listing' },
   );
+  assert.match(batches[1].batchId, /^obsidian-[0-9a-f]{16}$/);
 });
 
 test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling points', async () => {
@@ -136,7 +192,7 @@ test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling
 
   const batch = await readObsidianBatch(root, 'batch.md');
 
-  assert.equal(batch.batchId, 'reflective-vest-001');
+  assert.match(batch.batchId, /^obsidian-[0-9a-f]{16}$/);
   assert.equal(batch.plans[2].sellingPoints, [
     'Plan 3 Point 1: Verified selling point 1.',
     'Plan 3 Point 2: Verified selling point 2.',
@@ -149,6 +205,39 @@ test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling
   assert.equal(typeof batch.source.modifiedAt, 'string');
 });
 
+test('body parser reports the exact plan with a missing title', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-error-'));
+  await writeFile(path.join(root, 'body.md'), bodyMarkdown({ missing: 'title-3' }), 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案 3 缺少 Title/);
+});
+
+test('body parser reports invalid plan numbering', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-number-error-'));
+  await writeFile(path.join(root, 'body.md'), bodyMarkdown().replace('## 方案 5：正文方案', '## 方案 4：正文方案'), 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案编号必须恰好为 1、2、3、4、5/);
+});
+
+test('body parser reports an attribute count with the exact plan', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-attribute-error-'));
+  const markdown = bodyMarkdown().replace('10. Attribute 10: Plan 2 Value 10\n\n### 5 FAQs', '### 5 FAQs');
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案 2.*10.*实际.*9/);
+});
+
+test('body parser reports a missing FAQ answer with the exact plan', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-faq-error-'));
+  const markdown = bodyMarkdown().replace('   **A:** Plan 5 Answer 5.\n', '');
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案 5.*FAQ 5.*Answer/);
+});
+
+test('body parser reports a selling-point count with the exact plan', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-selling-error-'));
+  const markdown = bodyMarkdown().replace('• Plan 1 Point 5: Body selling point 5.\n', '');
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案 1.*5.*实际.*4/);
+});
+
 test('readObsidianBatch rejects a managed selling-point block without exactly five bullets', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-points-'));
   const markdown = markdownFor(validPayload()).replace(
@@ -159,7 +248,7 @@ test('readObsidianBatch rejects a managed selling-point block without exactly fi
 
   await assert.rejects(
     () => readObsidianBatch(root, 'batch.md'),
-    /plan-3 的正文卖点必须正好包含 5 条/,
+    /方案 3 的 Selling Points 必须正好包含 5 条，实际包含 4 条/,
   );
 });
 

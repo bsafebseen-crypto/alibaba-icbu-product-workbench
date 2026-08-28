@@ -1,9 +1,9 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 const START_MARKER = '<!-- alibaba-listing-batch:start -->';
 const END_MARKER = '<!-- alibaba-listing-batch:end -->';
-const SELLING_POINTS_START_MARKER = '<!-- selling-points:start -->';
 const SELLING_POINTS_END_MARKER = '<!-- selling-points:end -->';
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 
@@ -30,55 +30,93 @@ export function extractListingPayload(markdown) {
   return JSON.parse(match[1]);
 }
 
-function managedSellingPointsByPlan(markdown) {
-  const machineBlockStart = markdown.indexOf(START_MARKER);
-  const humanMarkdown = machineBlockStart >= 0 ? markdown.slice(0, machineBlockStart) : markdown;
-  const headings = [...humanMarkdown.matchAll(/^##\s+方案\s+(\d+)(?:[：:].*)?$/gm)];
-  const values = new Map();
-
-  headings.forEach((heading, index) => {
-    const planId = `plan-${heading[1]}`;
-    if (values.has(planId)) throw new Error(`${planId} 的正文方案标题不能重复`);
-    const sectionEnd = headings[index + 1]?.index ?? humanMarkdown.length;
-    const section = humanMarkdown.slice(heading.index + heading[0].length, sectionEnd);
-    const starts = section.split(SELLING_POINTS_START_MARKER).length - 1;
-    const ends = section.split(SELLING_POINTS_END_MARKER).length - 1;
-    if (starts !== 1 || ends !== 1) throw new Error(`${planId} 必须包含一个正文卖点块`);
-
-    const start = section.indexOf(SELLING_POINTS_START_MARKER);
-    const end = section.indexOf(SELLING_POINTS_END_MARKER, start + SELLING_POINTS_START_MARKER.length);
-    if (end < start) throw new Error(`${planId} 的正文卖点块顺序无效`);
-    const block = section.slice(start + SELLING_POINTS_START_MARKER.length, end);
-    const headingMatch = /^####\s+Selling Points\s*$/im.exec(block);
-    if (!headingMatch) throw new Error(`${planId} 的正文卖点块缺少 Selling Points 标题`);
-    const sellingPointLines = block
-      .slice(headingMatch.index + headingMatch[0].length)
-      .split(/\r?\n/)
-      .flatMap((line) => {
-        const match = /^\s*•\s+(.+?)\s*$/.exec(line);
-        return match ? [match[1]] : [];
-      });
-    if (sellingPointLines.length !== 5) {
-      throw new Error(`${planId} 的正文卖点必须正好包含 5 条`);
-    }
-    values.set(planId, sellingPointLines.join('\n'));
-  });
-
-  return values;
+function sectionBetween(markdown, headingPattern) {
+  const heading = headingPattern.exec(markdown);
+  if (!heading) return null;
+  const contentStart = heading.index + heading[0].length;
+  const nextHeading = /^#{2,3}\s+.+$/gm;
+  nextHeading.lastIndex = contentStart;
+  const next = nextHeading.exec(markdown);
+  const marker = markdown.indexOf(SELLING_POINTS_END_MARKER, contentStart);
+  const contentEnd = [next?.index, marker >= 0 ? marker : undefined]
+    .filter((value) => value !== undefined)
+    .reduce((end, value) => Math.min(end, value), markdown.length);
+  return markdown.slice(contentStart, contentEnd);
 }
 
-function applyManagedSellingPoints(payload, markdown) {
-  const values = managedSellingPointsByPlan(markdown);
-  if (!Array.isArray(payload?.plans)) return payload;
+function parseBodyPlan(section, planNumber) {
+  const titleLines = [...section.matchAll(/^[ \t]*-[ \t]+\*\*Title:\*\*[ \t]*(.*?)[ \t]*$/gim)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  if (titleLines.length !== 1) throw new Error(`方案 ${planNumber} 缺少 Title`);
+
+  const attributesSection = sectionBetween(section, /^###\s+10 Custom Attributes\s*$/im);
+  if (attributesSection === null) throw new Error(`方案 ${planNumber} 缺少 Custom Attributes`);
+  const attributes = [...attributesSection.matchAll(/^[ \t]*(\d+)\.[ \t]+([^:\r\n]+):[ \t]*(.*?)[ \t]*$/gm)]
+    .map((match) => ({ name: match[2].trim(), value: match[3].trim() }))
+    .filter(({ name, value }) => name && value);
+  if (attributes.length !== 10) {
+    throw new Error(`方案 ${planNumber} 的 Custom Attributes 必须正好包含 10 条，实际包含 ${attributes.length} 条`);
+  }
+
+  const faqsSection = sectionBetween(section, /^###\s+5 FAQs\s*$/im);
+  if (faqsSection === null) throw new Error(`方案 ${planNumber} 缺少 FAQs`);
+  const questionMatches = [...faqsSection.matchAll(/^[ \t]*(\d+)\.[ \t]+\*\*Q:\*\*[ \t]*(.*?)[ \t]*$/gim)];
+  if (questionMatches.length !== 5) {
+    throw new Error(`方案 ${planNumber} 的 FAQs 必须正好包含 5 条，实际包含 ${questionMatches.length} 条`);
+  }
+  const faqs = questionMatches.map((questionMatch, index) => {
+    const answerStart = questionMatch.index + questionMatch[0].length;
+    const answerEnd = questionMatches[index + 1]?.index ?? faqsSection.length;
+    const answerSection = faqsSection.slice(answerStart, answerEnd);
+    const answerMatch = /^[ \t]*\*\*A:\*\*[ \t]*(.*?)[ \t]*$/im.exec(answerSection);
+    if (!answerMatch || !answerMatch[1].trim()) {
+      throw new Error(`方案 ${planNumber} FAQ ${questionMatch[1]} 缺少 Answer`);
+    }
+    return { question: questionMatch[2].trim(), answer: answerMatch[1].trim() };
+  });
+
+  const sellingPointsSection = sectionBetween(section, /^####\s+Selling Points\s*$/im);
+  if (sellingPointsSection === null) throw new Error(`方案 ${planNumber} 缺少 Selling Points`);
+  const points = [...sellingPointsSection.matchAll(/^[ \t]*[•*-][ \t]+(.+?)[ \t]*$/gm)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  if (points.length !== 5) {
+    throw new Error(`方案 ${planNumber} 的 Selling Points 必须正好包含 5 条，实际包含 ${points.length} 条`);
+  }
+
   return {
-    ...payload,
-    plans: payload.plans.map((plan) => {
-      const planId = String(plan?.id || '').trim();
-      const sellingPoints = values.get(planId);
-      if (!sellingPoints) throw new Error(`${planId || '未知方案'} 缺少有效的正文卖点`);
-      return { ...plan, sellingPoints };
-    }),
+    id: `plan-${planNumber}`,
+    title: titleLines[0],
+    sellingPoints: points.join('\n'),
+    faqs,
+    customAttributes: attributes,
   };
+}
+
+export function parseListingBody(markdown, source = {}, legacyPayload = null) {
+  if (typeof markdown !== 'string') throw new Error('Markdown 内容必须是字符串');
+  const machineStart = markdown.indexOf(START_MARKER);
+  const humanMarkdown = machineStart >= 0 ? markdown.slice(0, machineStart) : markdown;
+  const matches = [...humanMarkdown.matchAll(/^##\s+方案\s+([1-5])(?:[：:].*)?$/gm)];
+  const numbers = matches.map((match) => Number(match[1]));
+  if (matches.length !== 5 || numbers.join(',') !== '1,2,3,4,5') {
+    throw new Error('方案编号必须恰好为 1、2、3、4、5');
+  }
+  const plans = matches.map((match, index) => {
+    const end = matches[index + 1]?.index ?? humanMarkdown.length;
+    return parseBodyPlan(humanMarkdown.slice(match.index, end), Number(match[1]));
+  });
+  const heading = /^#\s+(.+?)(?:\s+国际站发品方案)?\s*$/m.exec(humanMarkdown)?.[1]?.trim();
+  const fallbackName = path.parse(source.fileName || 'Obsidian Listing').name;
+  const pathKey = String(source.relativePath || source.fileName || fallbackName).replaceAll('\\', '/');
+  const fallbackId = `obsidian-${createHash('sha256').update(pathKey).digest('hex').slice(0, 16)}`;
+  return validateListingBatch({
+    schemaVersion: OBSIDIAN_LISTING_SCHEMA_VERSION,
+    batchId: legacyPayload?.batchId || fallbackId,
+    batchName: heading || fallbackName,
+    plans,
+  }, source);
 }
 
 function requireRecord(value, path) {
@@ -235,7 +273,7 @@ export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativ
   if (fileStat.size > MAX_MARKDOWN_BYTES) throw new Error('Markdown 文件不能超过 2 MiB');
 
   const markdown = await readFile(realFile, 'utf8');
-  return validateListingBatch(applyManagedSellingPoints(extractListingPayload(markdown), markdown), {
+  return parseListingBody(markdown, {
     relativePath: portableRelativePath(realRoot, realFile),
     fileName: path.basename(realFile),
     modifiedAt: fileStat.mtime.toISOString(),
