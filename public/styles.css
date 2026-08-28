@@ -445,6 +445,7 @@ body::before { display: none; }
 .obsidian-status, .obsidian-remaining { margin: 0; padding: 0 18px 18px; color: var(--muted); font-size: 10px; }
 .obsidian-status[data-kind="success"] { color: #19725a; }
 .obsidian-status[data-kind="error"] { color: #a73f32; }
+.obsidian-status[data-kind="warning"] { color: var(--orange-dark); }
 .obsidian-source-row { display: grid; grid-template-columns: minmax(260px, 1fr) 1fr; align-items: end; gap: 18px; padding: 18px; }
 .obsidian-source-row p { margin: 0 0 10px; color: var(--muted); font-size: 9px; }
 .obsidian-source-row > div { display: grid; justify-items: start; gap: 8px; }
