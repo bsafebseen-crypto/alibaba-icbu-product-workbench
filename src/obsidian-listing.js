@@ -98,7 +98,7 @@ export function parseListingBody(markdown, source = {}, legacyPayload = null) {
   if (typeof markdown !== 'string') throw new Error('Markdown 内容必须是字符串');
   const machineStart = markdown.indexOf(START_MARKER);
   const humanMarkdown = machineStart >= 0 ? markdown.slice(0, machineStart) : markdown;
-  const matches = [...humanMarkdown.matchAll(/^##\s+方案\s+([1-5])(?:[：:].*)?$/gm)];
+  const matches = [...humanMarkdown.matchAll(/^##\s+方案\s+(\d+)(?:[：:].*)?$/gm)];
   const numbers = matches.map((match) => Number(match[1]));
   if (matches.length !== 5 || numbers.join(',') !== '1,2,3,4,5') {
     throw new Error('方案编号必须恰好为 1、2、3、4、5');

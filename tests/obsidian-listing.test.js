@@ -217,6 +217,12 @@ test('body parser reports invalid plan numbering', async () => {
   await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案编号必须恰好为 1、2、3、4、5/);
 });
 
+test('body parser rejects an out-of-range plan heading', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-extra-plan-'));
+  await writeFile(path.join(root, 'body.md'), `${bodyMarkdown()}\n## 方案 6：额外方案`, 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案编号必须恰好为 1、2、3、4、5/);
+});
+
 test('body parser reports an attribute count with the exact plan', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-attribute-error-'));
   const markdown = bodyMarkdown().replace('10. Attribute 10: Plan 2 Value 10\n\n### 5 FAQs', '### 5 FAQs');
