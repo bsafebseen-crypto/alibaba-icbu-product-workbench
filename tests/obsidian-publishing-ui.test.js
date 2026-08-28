@@ -12,6 +12,8 @@ import {
   imageContentKey,
   invalidatePreviewState,
   pendingVariants,
+  preferredBatchPath,
+  prepareReplacementVariant,
   remainingPlans,
   resolveUploadedImages,
   uniqueAssignmentImages,
@@ -33,6 +35,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     allVariants: [],
     variants: [],
     completedDrafts: [],
+    replacementDraftIds: {},
     mainImages: [null, null, null, null],
     marketingImages: [],
     fixedImages: [],
@@ -46,6 +49,15 @@ test('createObsidianPublishingState starts without persisted product data', () =
     loading: false,
     error: '',
   });
+});
+
+test('preferredBatchPath automatically selects the newest valid Markdown batch', () => {
+  assert.equal(preferredBatchPath([
+    { relativePath: 'new-invalid.md', valid: false, modifiedAt: '2026-08-28T10:00:00.000Z' },
+    { relativePath: 'older.md', valid: true, modifiedAt: '2026-08-27T10:00:00.000Z' },
+    { relativePath: 'newer.md', valid: true, modifiedAt: '2026-08-28T09:00:00.000Z' },
+  ]), 'newer.md');
+  assert.equal(preferredBatchPath([{ relativePath: 'invalid.md', valid: false }]), '');
 });
 
 test('imageContentKey hashes file bytes instead of reusable file metadata', async () => {
@@ -105,6 +117,19 @@ test('pendingVariants excludes completed plans without changing source order', (
   assert.deepEqual(pendingVariants(variants, ['plan-2']).map(({ id }) => id), [
     'plan-3', 'plan-4', 'plan-5',
   ]);
+});
+
+test('prepareReplacementVariant adds one completed plan back without duplicating pending plans', () => {
+  const allVariants = ['plan-2', 'plan-3', 'plan-4', 'plan-5'].map((id) => ({ id }));
+  const pending = [{ id: 'plan-5' }];
+  assert.deepEqual(
+    prepareReplacementVariant(allVariants, pending, 'plan-4').map(({ id }) => id),
+    ['plan-4', 'plan-5'],
+  );
+  assert.throws(
+    () => prepareReplacementVariant(allVariants, pending, 'missing'),
+    /不属于当前批次/,
+  );
 });
 
 test('resolveUploadedImages maps one main and five auxiliary images in selection order', () => {
@@ -228,5 +253,26 @@ test('buildPreviewRequest preserves source product publishing context', () => {
     planIds: ['plan-2', 'plan-3'],
     sellingPointBinding: state.sellingPointBinding,
     imagesByPlan,
+  });
+});
+
+test('buildPreviewRequest binds a replacement preview to the exact prior draft id', () => {
+  const state = createObsidianPublishingState();
+  state.batch = { source: { relativePath: '2026-08-25/反光T恤4.md' } };
+  state.basePlanId = 'plan-1';
+  state.sourceContext = { sourceProductId: '1601933369105' };
+  state.sellingPointBinding = { fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text' };
+  state.variants = [{ id: 'plan-4' }];
+  state.replacementDraftIds = { 'plan-4': '1601935213152' };
+
+  assert.deepEqual(buildPreviewRequest(state, { 'plan-4': [] }), {
+    relativePath: '2026-08-25/反光T恤4.md',
+    basePlanId: 'plan-1',
+    sourceContext: state.sourceContext,
+    planIds: ['plan-4'],
+    sellingPointBinding: state.sellingPointBinding,
+    imagesByPlan: { 'plan-4': [] },
+    replacementDraftIds: { 'plan-4': '1601935213152' },
+    replacementConfirmed: true,
   });
 });

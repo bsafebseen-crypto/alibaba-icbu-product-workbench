@@ -352,9 +352,32 @@ export function createServer(options = {}) {
             basePlanId: body.basePlanId,
             sourceProductId: body.sourceContext?.sourceProductId,
           });
-          const repeatedPlanId = requestedPlanIds.find((planId) => completedPlanIds.includes(planId));
-          if (repeatedPlanId) {
-            throw Object.assign(new Error(`${repeatedPlanId} 已有草稿，禁止重复准备`), { status: 409 });
+          const repeatedPlanIds = requestedPlanIds.filter((planId) => completedPlanIds.includes(planId));
+          const replacementDraftIds = body.replacementDraftIds
+            && typeof body.replacementDraftIds === 'object'
+            && !Array.isArray(body.replacementDraftIds)
+            ? body.replacementDraftIds
+            : {};
+          const replacementByPlan = {};
+          if (repeatedPlanIds.length) {
+            if (body.replacementConfirmed !== true) {
+              throw Object.assign(new Error(`${repeatedPlanIds[0]} 已有草稿，禁止重复准备；修正版必须明确绑定原草稿 ID`), { status: 409 });
+            }
+            const completedDrafts = await listObsidianDrafts(rootDir);
+            for (const planId of repeatedPlanIds) {
+              const draftProductId = String(replacementDraftIds[planId] || '').trim();
+              const exactPriorDraft = completedDrafts.find((draft) => (
+                draft.relativePath === body.relativePath
+                && draft.basePlanId === body.basePlanId
+                && draft.sourceProductId === String(body.sourceContext?.sourceProductId || '')
+                && draft.planId === planId
+                && draft.draftProductId === draftProductId
+              ));
+              if (!exactPriorDraft) {
+                throw Object.assign(new Error(`${planId} 的修正版未绑定匹配的原草稿 ID`), { status: 409 });
+              }
+              replacementByPlan[planId] = draftProductId;
+            }
           }
           const storedBinding = await readSellingPointBinding(rootDir, context);
           if (!storedBinding) {
@@ -395,6 +418,9 @@ export function createServer(options = {}) {
               planId: preview.planId,
               fingerprint: preview.fingerprint,
               status: 'preview_ready',
+              ...(replacementByPlan[preview.planId]
+                ? { replacesDraftProductId: replacementByPlan[preview.planId] }
+                : {}),
             })),
           });
           previewSessions.set(sessionId, {

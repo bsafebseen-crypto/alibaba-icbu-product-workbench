@@ -45,6 +45,7 @@ function safeItem(item = {}) {
     draftProductId: item.draftProductId,
     traceId: item.traceId,
     requestId: item.requestId,
+    replacesDraftProductId: item.replacesDraftProductId,
     errorCode: item.errorCode,
     errorMessage: item.errorMessage,
     completedAt: item.completedAt,
@@ -113,6 +114,7 @@ export async function listObsidianDrafts(rootDir) {
       sourceProductId: String(task.sourceProductId || ''),
       planId: String(item.planId || ''),
       draftProductId: String(item.draftProductId),
+      replacesDraftProductId: String(item.replacesDraftProductId || ''),
       completedAt: String(item.completedAt || ''),
     }).filter(([, value]) => value !== ''))))
     .sort((left, right) => right.completedAt.localeCompare(left.completedAt));

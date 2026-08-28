@@ -12,6 +12,7 @@ export function createObsidianPublishingState() {
     allVariants: [],
     variants: [],
     completedDrafts: [],
+    replacementDraftIds: {},
     mainImages: [null, null, null, null],
     marketingImages: [],
     fixedImages: [],
@@ -123,6 +124,23 @@ export function pendingVariants(variants = [], completedPlanIds = []) {
   return variants.filter((variant) => !completed.has(String(variant?.id || variant?.planId || '')));
 }
 
+export function preferredBatchPath(batches = []) {
+  return batches
+    .filter((batch) => batch?.valid && batch.relativePath)
+    .reduce((latest, batch) => {
+      if (!latest) return batch;
+      return Date.parse(batch.modifiedAt || '') > Date.parse(latest.modifiedAt || '') ? batch : latest;
+    }, null)?.relativePath || '';
+}
+
+export function prepareReplacementVariant(allVariants = [], pending = [], planId = '') {
+  if (!allVariants.some((variant) => variant.id === planId)) {
+    throw new Error('修正版方案不属于当前批次');
+  }
+  const selected = new Set([...pending.map((variant) => variant.id), planId]);
+  return allVariants.filter((variant) => selected.has(variant.id));
+}
+
 export function formatDraftVerification(result = {}) {
   const trace = result.traceId ? `追踪号 ${result.traceId}` : '无追踪号';
   if (result.comparison?.exactMatch) {
@@ -153,6 +171,8 @@ export function formatPreviewSuccess(count) {
 }
 
 export function buildPreviewRequest(state, imagesByPlan) {
+  const replacementDraftIds = Object.fromEntries(Object.entries(state.replacementDraftIds || {})
+    .filter(([planId]) => state.variants.some((variant) => variant.id === planId)));
   return {
     relativePath: state.batch.source.relativePath,
     basePlanId: state.basePlanId,
@@ -160,6 +180,10 @@ export function buildPreviewRequest(state, imagesByPlan) {
     planIds: state.variants.map((variant) => variant.id),
     sellingPointBinding: state.sellingPointBinding,
     imagesByPlan,
+    ...(Object.keys(replacementDraftIds).length ? {
+      replacementDraftIds,
+      replacementConfirmed: true,
+    } : {}),
   };
 }
 
@@ -229,6 +253,7 @@ export function initObsidianPublishing({
     state.allVariants = [];
     state.variants = [];
     state.completedDrafts = [];
+    state.replacementDraftIds = {};
     state.mainImages = [null, null, null, null];
     state.marketingImages = [];
     state.filesByPlan = {};
@@ -333,6 +358,8 @@ export function initObsidianPublishing({
     elements.variants.replaceChildren();
     for (const [index, variant] of state.allVariants.entries()) {
       const completed = state.completedDrafts.find((draft) => draft.planId === variant.id);
+      const replacementDraftId = state.replacementDraftIds[variant.id];
+      const replacing = Boolean(replacementDraftId);
       const card = documentRef.createElement('article');
       card.className = 'obsidian-variant-card';
       card.dataset.planId = variant.id;
@@ -346,7 +373,9 @@ export function initObsidianPublishing({
       copy.append(title, detail);
       const status = documentRef.createElement('span');
       status.className = 'obsidian-variant-status';
-      status.textContent = completed ? `草稿 ID ${completed.draftProductId}` : '待准备共享图片';
+      status.textContent = replacing
+        ? `准备修正版 · 原草稿 ${replacementDraftId}`
+        : completed ? `草稿 ID ${completed.draftProductId}` : '待准备共享图片';
       heading.append(copy, status);
 
       const content = documentRef.createElement('details');
@@ -356,14 +385,22 @@ export function initObsidianPublishing({
       description.textContent = variant.sellingPoints;
       content.append(summary, description);
       card.append(heading, content);
-      if (!completed) {
+      if (!completed || replacing) {
         const draftButton = documentRef.createElement('button');
         draftButton.className = 'button obsidian-draft-button';
         draftButton.type = 'button';
         draftButton.dataset.planId = variant.id;
-        draftButton.textContent = '确认并创建此商品草稿';
+        draftButton.textContent = replacing ? '确认并创建修正版草稿' : '确认并创建此商品草稿';
         draftButton.disabled = true;
         card.append(draftButton);
+      } else {
+        const replacementButton = documentRef.createElement('button');
+        replacementButton.className = 'button quiet obsidian-replace-draft-button';
+        replacementButton.type = 'button';
+        replacementButton.dataset.planId = variant.id;
+        replacementButton.dataset.draftProductId = completed.draftProductId;
+        replacementButton.textContent = '重新准备修正版';
+        card.append(replacementButton);
       }
       elements.variants.append(card);
     }
@@ -393,7 +430,7 @@ export function initObsidianPublishing({
         row.append(title, names);
         elements.assignmentSummary.append(row);
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(assignment.planId)}"]`);
-        if (!state.completedDrafts.some((draft) => draft.planId === assignment.planId)) {
+        if (state.variants.some((variant) => variant.id === assignment.planId)) {
           text(card?.querySelector('.obsidian-variant-status'), '6 张图片已自动分配');
         }
       }
@@ -438,30 +475,7 @@ export function initObsidianPublishing({
     }
   }
 
-  async function refreshBatches() {
-    state.loading = true;
-    elements.refresh.disabled = true;
-    setStatus('正在读取 Obsidian 发品目录…');
-    try {
-      const result = await requestJson('/api/obsidian/batches');
-      state.batches = result.batches;
-      renderBatchList();
-      await refreshSavedDrafts();
-      setStatus(`已找到 ${state.batches.length} 个 Markdown 文件。`, 'success');
-    } catch (error) {
-      state.error = error.message;
-      setStatus(error.message, 'error');
-    } finally {
-      state.loading = false;
-      elements.refresh.disabled = false;
-    }
-  }
-
-  elements.select.addEventListener('change', () => {
-    elements.load.disabled = !elements.select.value;
-  });
-  elements.refresh.addEventListener('click', refreshBatches);
-  elements.load.addEventListener('click', async () => {
+  async function loadSelectedBatch() {
     if (!elements.select.value) return;
     elements.load.disabled = true;
     setStatus('正在校验五套方案…');
@@ -480,7 +494,38 @@ export function initObsidianPublishing({
     } finally {
       elements.load.disabled = false;
     }
+  }
+
+  async function refreshBatches({ autoLoad = false } = {}) {
+    state.loading = true;
+    elements.refresh.disabled = true;
+    setStatus('正在读取 Obsidian 发品目录…');
+    try {
+      const result = await requestJson('/api/obsidian/batches');
+      state.batches = result.batches;
+      renderBatchList();
+      const preferredPath = preferredBatchPath(state.batches);
+      if (preferredPath) {
+        elements.select.value = preferredPath;
+        elements.load.disabled = false;
+      }
+      await refreshSavedDrafts();
+      if (autoLoad && preferredPath) await loadSelectedBatch();
+      else setStatus(`已找到 ${state.batches.length} 个 Markdown 文件。`, 'success');
+    } catch (error) {
+      state.error = error.message;
+      setStatus(error.message, 'error');
+    } finally {
+      state.loading = false;
+      elements.refresh.disabled = false;
+    }
+  }
+
+  elements.select.addEventListener('change', () => {
+    elements.load.disabled = !elements.select.value;
   });
+  elements.refresh.addEventListener('click', refreshBatches);
+  elements.load.addEventListener('click', loadSelectedBatch);
   elements.plans.addEventListener('change', (event) => {
     if (event.target.name !== 'obsidian-base-plan') return;
     state.basePlanId = event.target.value;
@@ -747,6 +792,18 @@ export function initObsidianPublishing({
     }
   });
   elements.variants.addEventListener('click', async (event) => {
+    const replacementButton = event.target.closest('.obsidian-replace-draft-button');
+    if (replacementButton) {
+      const planId = replacementButton.dataset.planId;
+      state.replacementDraftIds[planId] = replacementButton.dataset.draftProductId;
+      state.variants = prepareReplacementVariant(state.allVariants, state.variants, planId);
+      invalidatePreviewState(state);
+      renderVariants();
+      renderSharedAssignments();
+      elements.generatePreviews.disabled = true;
+      text(elements.draftStatus, `${planId} 将创建修正版；原草稿 ${state.replacementDraftIds[planId]} 会保留。`);
+      return;
+    }
     const button = event.target.closest('.obsidian-draft-button');
     if (!button) return;
     const planId = button.dataset.planId;
@@ -754,7 +811,7 @@ export function initObsidianPublishing({
     const variant = state.variants.find((candidate) => candidate.id === planId);
     if (!preview || !variant || !state.sessionId) return;
     const confirmed = windowRef.confirm(
-      `即将在阿里国际站创建 1 个商品草稿：\n\n${variant.title}\n\n母商品 ID：${state.sourceProductId}\n方案：${planId}\n\n只创建这一份草稿，不会正式发布。是否继续？`,
+      `即将在阿里国际站创建 1 个商品草稿：\n\n${variant.title}\n\n母商品 ID：${state.sourceProductId}\n方案：${planId}${state.replacementDraftIds[planId] ? `\n原草稿：${state.replacementDraftIds[planId]}（保留不修改）` : ''}\n\n只创建这一份草稿，不会正式发布。是否继续？`,
     );
     if (!confirmed) return;
 
@@ -826,6 +883,7 @@ export function initObsidianPublishing({
   renderPlans();
   loadFixedImages();
   refreshSavedDrafts();
+  void refreshBatches({ autoLoad: true });
   return { state, refreshBatches };
 }
 import { fileToDataUrl } from './similar-product-ui.js';

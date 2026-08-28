@@ -866,6 +866,51 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
   });
 });
 
+test('POST /api/obsidian/preview permits an explicitly confirmed replacement bound to the prior draft id', async () => {
+  let storedTaskInput;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md',
+        basePlanId: 'base',
+        planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601933369105', categoryId: '32905', language: 'en_US',
+          version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        sellingPointBinding,
+        imagesByPlan: {
+          'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+        },
+        replacementDraftIds: { 'variant-1': '1601935213152' },
+        replacementConfirmed: true,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(storedTaskInput.items[0].replacesDraftProductId, '1601935213152');
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: (_schemaXml, binding) => binding,
+    listCompletedObsidianPlanIds: async () => ['variant-1'],
+    listObsidianDrafts: async () => [{
+      relativePath: 'batch.md', basePlanId: 'base', sourceProductId: '1601933369105',
+      planId: 'variant-1', draftProductId: '1601935213152',
+    }],
+    createStrictProductPreview: (_schemaXml, variant) => ({
+      fingerprint: `hash-${variant.planId}`, previewXml: '<preview />', changedFields: ['sellingPoints'],
+    }),
+    createObsidianPublishingTask: async (_rootDir, input) => {
+      storedTaskInput = input;
+      return { id: 'replacement-task', version: 1 };
+    },
+  });
+});
+
 test('POST /api/obsidian/draft requires confirmation and creates one fingerprint-bound draft', async () => {
   let draftCalls = 0;
   await withServer(async (baseUrl) => {
