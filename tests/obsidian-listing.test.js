@@ -223,6 +223,13 @@ test('body parser rejects an out-of-range plan heading', async () => {
   await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案编号必须恰好为 1、2、3、4、5/);
 });
 
+test('body parser rejects zero-padded plan headings', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-zero-padded-plan-'));
+  const markdown = bodyMarkdown().replace(/## 方案 ([1-5])：/g, '## 方案 0$1：');
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+  await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案编号必须恰好为 1、2、3、4、5/);
+});
+
 test('body parser reports an attribute count with the exact plan', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-attribute-error-'));
   const markdown = bodyMarkdown().replace('10. Attribute 10: Plan 2 Value 10\n\n### 5 FAQs', '### 5 FAQs');
