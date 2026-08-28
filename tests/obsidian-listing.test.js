@@ -130,7 +130,7 @@ test('listObsidianBatches finds nested Markdown and reports invalid files safely
   );
 });
 
-test('readObsidianBatch returns a validated batch for a relative Markdown path', async () => {
+test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling points', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-read-'));
   await writeFile(path.join(root, 'batch.md'), markdownFor(validPayload()), 'utf8');
 
@@ -138,12 +138,13 @@ test('readObsidianBatch returns a validated batch for a relative Markdown path',
 
   assert.equal(batch.batchId, 'reflective-vest-001');
   assert.equal(batch.plans[2].sellingPoints, [
-    '• Plan 3 Point 1: Verified selling point 1.',
-    '• Plan 3 Point 2: Verified selling point 2.',
-    '• Plan 3 Point 3: Verified selling point 3.',
-    '• Plan 3 Point 4: Verified selling point 4.',
-    '• Plan 3 Point 5: Verified selling point 5.',
+    'Plan 3 Point 1: Verified selling point 1.',
+    'Plan 3 Point 2: Verified selling point 2.',
+    'Plan 3 Point 3: Verified selling point 3.',
+    'Plan 3 Point 4: Verified selling point 4.',
+    'Plan 3 Point 5: Verified selling point 5.',
   ].join('\n'));
+  assert.doesNotMatch(batch.plans[2].sellingPoints, /^•/m);
   assert.equal(batch.source.relativePath, 'batch.md');
   assert.equal(typeof batch.source.modifiedAt, 'string');
 });

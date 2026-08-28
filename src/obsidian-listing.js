@@ -56,7 +56,7 @@ function managedSellingPointsByPlan(markdown) {
       .split(/\r?\n/)
       .flatMap((line) => {
         const match = /^\s*•\s+(.+?)\s*$/.exec(line);
-        return match ? [`• ${match[1]}`] : [];
+        return match ? [match[1]] : [];
       });
     if (sellingPointLines.length !== 5) {
       throw new Error(`${planId} 的正文卖点必须正好包含 5 条`);
