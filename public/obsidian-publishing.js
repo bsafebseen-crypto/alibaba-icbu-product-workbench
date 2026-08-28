@@ -32,6 +32,13 @@ export function imageFileKey(file) {
   return `${file.name}:${file.size}:${file.lastModified}`;
 }
 
+export function formatBatchLoadStatus(batch) {
+  const warnings = Array.isArray(batch?.source?.warnings) ? batch.source.warnings.filter(Boolean) : [];
+  return warnings.length
+    ? { message: `批次校验通过。${warnings.join('；')}`, tone: 'warning' }
+    : { message: '批次校验通过。请选择已经手动发布的母商品方案。', tone: 'success' };
+}
+
 export async function imageContentKey(file, cryptoRef = globalThis.crypto) {
   const digest = await cryptoRef.subtle.digest('SHA-256', await file.arrayBuffer());
   return [...new Uint8Array(digest)]
@@ -487,7 +494,8 @@ export function initObsidianPublishing({
       state.basePlanId = '';
       invalidatePreparedData();
       renderPlans();
-      setStatus('批次校验通过。请选择已经手动发布的母商品方案。', 'success');
+      const status = formatBatchLoadStatus(state.batch);
+      setStatus(status.message, status.tone);
     } catch (error) {
       state.error = error.message;
       setStatus(error.message, 'error');

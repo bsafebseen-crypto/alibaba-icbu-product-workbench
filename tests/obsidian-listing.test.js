@@ -111,6 +111,31 @@ test('readObsidianBatch parses five complete plans without a machine block', asy
   assert.equal(batch.plans[3].sellingPoints.split('\n').length, 5);
 });
 
+test('body content wins when a legacy machine block is stale', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-legacy-drift-'));
+  const legacy = validPayload();
+  legacy.plans[0].title = 'Stale machine title';
+  const machine = `<!-- alibaba-listing-batch:start -->\n\`\`\`json\n${JSON.stringify(legacy)}\n\`\`\`\n<!-- alibaba-listing-batch:end -->`;
+  await writeFile(path.join(root, 'body.md'), `${bodyMarkdown()}\n${machine}`, 'utf8');
+
+  const batch = await readObsidianBatch(root, 'body.md');
+
+  assert.equal(batch.batchId, legacy.batchId);
+  assert.equal(batch.plans[0].title, 'Reflective Product Body Plan 1');
+  assert.deepEqual(batch.source.warnings, ['机器数据块内容已过期，当前按正文读取']);
+});
+
+test('readObsidianBatch loads valid body content when legacy machine JSON is malformed', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-legacy-malformed-'));
+  const machine = '<!-- alibaba-listing-batch:start -->\n```json\n{invalid\n```\n<!-- alibaba-listing-batch:end -->';
+  await writeFile(path.join(root, 'body.md'), `${bodyMarkdown()}\n${machine}`, 'utf8');
+
+  const batch = await readObsidianBatch(root, 'body.md');
+
+  assert.equal(batch.plans[0].title, 'Reflective Product Body Plan 1');
+  assert.match(batch.source.warnings[0], /机器数据块无效/);
+});
+
 test('readObsidianBatch strips all supported Obsidian selling-point bullets', async () => {
   for (const bullet of ['•', '-', '*']) {
     const root = await mkdtemp(path.join(tmpdir(), 'obsidian-body-bullets-'));
@@ -180,10 +205,10 @@ test('listObsidianBatches finds nested Markdown and reports invalid files safely
   assert.equal(batches[0].valid, false);
   assert.match(batches[0].error, /方案编号必须恰好为 1、2、3、4、5/);
   assert.deepEqual(
-    { valid: batches[1].valid, batchName: batches[1].batchName },
-    { valid: true, batchName: 'Human-readable listing' },
+    { valid: batches[1].valid, batchName: batches[1].batchName, warnings: batches[1].warnings },
+    { valid: true, batchName: 'Human-readable listing', warnings: [] },
   );
-  assert.match(batches[1].batchId, /^obsidian-[0-9a-f]{16}$/);
+  assert.equal(batches[1].batchId, 'reflective-vest-001');
 });
 
 test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling points', async () => {
@@ -192,7 +217,7 @@ test('readObsidianBatch strips Obsidian bullets before returning Alibaba selling
 
   const batch = await readObsidianBatch(root, 'batch.md');
 
-  assert.match(batch.batchId, /^obsidian-[0-9a-f]{16}$/);
+  assert.equal(batch.batchId, 'reflective-vest-001');
   assert.equal(batch.plans[2].sellingPoints, [
     'Plan 3 Point 1: Verified selling point 1.',
     'Plan 3 Point 2: Verified selling point 2.',

@@ -30,6 +30,17 @@ export function extractListingPayload(markdown) {
   return JSON.parse(match[1]);
 }
 
+function readLegacyPayload(markdown) {
+  if (!markdown.includes(START_MARKER) && !markdown.includes(END_MARKER)) {
+    return { payload: null, warnings: [] };
+  }
+  try {
+    return { payload: extractListingPayload(markdown), warnings: [] };
+  } catch (error) {
+    return { payload: null, warnings: [`机器数据块无效，当前按正文读取：${error.message}`] };
+  }
+}
+
 function sectionBetween(markdown, headingPattern) {
   const heading = headingPattern.exec(markdown);
   if (!heading) return null;
@@ -248,6 +259,7 @@ export async function listObsidianBatches(rootDir = DEFAULT_OBSIDIAN_ROOT) {
         error: '',
         batchId: batch.batchId,
         batchName: batch.batchName,
+        warnings: Array.isArray(batch.source.warnings) ? [...batch.source.warnings] : [],
       });
     } catch (error) {
       results.push({ ...metadata, valid: false, error: error.message, batchId: '', batchName: '' });
@@ -273,10 +285,30 @@ export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativ
   if (fileStat.size > MAX_MARKDOWN_BYTES) throw new Error('Markdown 文件不能超过 2 MiB');
 
   const markdown = await readFile(realFile, 'utf8');
-  return parseListingBody(markdown, {
+  const source = {
     relativePath: portableRelativePath(realRoot, realFile),
     fileName: path.basename(realFile),
     modifiedAt: fileStat.mtime.toISOString(),
     size: fileStat.size,
-  });
+  };
+  const legacy = readLegacyPayload(markdown);
+  const warnings = [...legacy.warnings];
+  let legacyPayload = legacy.payload;
+  if (legacyPayload) {
+    try {
+      legacyPayload = validateListingBatch(legacyPayload);
+    } catch (error) {
+      legacyPayload = null;
+      warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
+    }
+  }
+
+  const batch = parseListingBody(markdown, source, legacyPayload);
+  if (legacyPayload && JSON.stringify(legacyPayload.plans) !== JSON.stringify(batch.plans)) {
+    warnings.push('机器数据块内容已过期，当前按正文读取');
+  }
+  return {
+    ...batch,
+    source: { ...batch.source, warnings },
+  };
 }

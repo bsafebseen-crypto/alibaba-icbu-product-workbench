@@ -6,6 +6,7 @@ import {
   buildSharedImageAssignments,
   commonSellingPointCandidate,
   createObsidianPublishingState,
+  formatBatchLoadStatus,
   formatDraftVerification,
   formatPreviewSuccess,
   imageFileKey,
@@ -58,6 +59,13 @@ test('preferredBatchPath automatically selects the newest valid Markdown batch',
     { relativePath: 'newer.md', valid: true, modifiedAt: '2026-08-28T09:00:00.000Z' },
   ]), 'newer.md');
   assert.equal(preferredBatchPath([{ relativePath: 'invalid.md', valid: false }]), '');
+});
+
+test('formatBatchLoadStatus presents batch warnings without rejecting the batch', () => {
+  assert.deepEqual(
+    formatBatchLoadStatus({ source: { warnings: ['机器数据块内容已过期，当前按正文读取'] } }),
+    { message: '批次校验通过。机器数据块内容已过期，当前按正文读取', tone: 'warning' },
+  );
 });
 
 test('imageContentKey hashes file bytes instead of reusable file metadata', async () => {
