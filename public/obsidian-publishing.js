@@ -166,6 +166,31 @@ export function chooseBatchAfterRefresh(batches = [], loadedPath = '') {
   };
 }
 
+export function draftsForBatch(drafts = [], batch = null) {
+  const relativePath = batch?.source?.relativePath || '';
+  if (!relativePath) return [];
+  return drafts.filter((draft) => draft?.relativePath === relativePath);
+}
+
+export function sellingPointCalibrationState(state = {}, draftProductId = '') {
+  if (!/^\d+$/.test(String(draftProductId).trim())) {
+    return { canAttempt: false, ready: false, message: '请先填写数字格式的已有草稿 ID。' };
+  }
+  if (!state.batch) {
+    return { canAttempt: true, ready: false, message: '草稿 ID 已填写；请先载入一个 Obsidian 批次。' };
+  }
+  if (!state.basePlanId) {
+    return { canAttempt: true, ready: false, message: '草稿 ID 已填写；请先选择已经发布的母商品方案。' };
+  }
+  if (!/^\d+$/.test(String(state.sourceProductId || '').trim())) {
+    return { canAttempt: true, ready: false, message: '母商品方案已选择；请填写阿里国际站母商品 ID。' };
+  }
+  if (!state.sourceContext) {
+    return { canAttempt: true, ready: false, message: '母商品与草稿 ID 已填写；请先点击“只读加载母商品 Schema”。' };
+  }
+  return { canAttempt: true, ready: true, message: '准备就绪，可以只读校准卖点字段。' };
+}
+
 export function prepareReplacementVariant(allVariants = [], pending = [], planId = '') {
   if (!allVariants.some((variant) => variant.id === planId)) {
     throw new Error('修正版方案不属于当前批次');
@@ -320,13 +345,16 @@ export function initObsidianPublishing({
 
   function renderSavedDrafts() {
     elements.savedDrafts.replaceChildren();
-    if (!state.savedDrafts.length) {
+    const visibleDrafts = draftsForBatch(state.savedDrafts, state.batch);
+    if (!visibleDrafts.length) {
       const empty = documentRef.createElement('p');
-      empty.textContent = '本机还没有已创建的商品草稿。';
+      empty.textContent = state.batch
+        ? '当前批次还没有已创建的商品草稿。'
+        : '载入批次后，这里只显示该批次的商品草稿。';
       elements.savedDrafts.append(empty);
       return;
     }
-    for (const draft of state.savedDrafts) {
+    for (const draft of visibleDrafts) {
       const row = documentRef.createElement('article');
       row.className = 'obsidian-saved-draft';
       const copy = documentRef.createElement('div');
@@ -439,6 +467,22 @@ export function initObsidianPublishing({
     }
   }
 
+  function syncCalibrationControls({ updateMessage = true } = {}) {
+    const readiness = sellingPointCalibrationState(
+      state,
+      elements.diagnosticDraftId.value,
+    );
+    elements.diagnoseSellingPoints.disabled = !readiness.canAttempt;
+    elements.diagnoseSellingPoints.title = readiness.ready ? '' : readiness.message;
+    elements.confirmSellingPoint.title = state.sellingPointBinding
+      ? ''
+      : '先完成只读校准，确认按钮才会启用。';
+    if (updateMessage && !state.sellingPointDiagnosis) {
+      text(elements.sellingPointStatus, readiness.message);
+    }
+    return readiness;
+  }
+
   function invalidateSharedImagePreview(message = '共享图片已经变化，请重新生成完整预览。') {
     invalidatePreviewState(state);
     elements.generatePreviews.disabled = true;
@@ -518,8 +562,13 @@ export function initObsidianPublishing({
         body: JSON.stringify({ relativePath: elements.select.value }),
       });
       state.basePlanId = '';
+      state.sourceProductId = '';
+      elements.sourceProductId.value = '';
+      elements.diagnosticDraftId.value = '';
       invalidatePreparedData();
       renderPlans();
+      renderSavedDrafts();
+      syncCalibrationControls();
       const status = formatBatchLoadStatus(state.batch);
       setStatus(status.message, status.tone);
     } catch (error) {
@@ -573,10 +622,14 @@ export function initObsidianPublishing({
     const variants = remainingPlans(state.batch, state.basePlanId);
     invalidatePreparedData();
     text(elements.remaining, `已排除母商品；将准备 ${variants.map((plan) => plan.id).join('、')} 共 4 个类似品。`);
+    text(elements.sourceStatus, '母商品方案已选择；请填写母商品 ID，再点击“只读加载母商品 Schema”。');
+    syncCalibrationControls();
   });
   elements.sourceProductId.addEventListener('input', () => {
     state.sourceProductId = elements.sourceProductId.value.trim();
+    syncCalibrationControls();
   });
+  elements.diagnosticDraftId.addEventListener('input', syncCalibrationControls);
   elements.loadSource.addEventListener('click', async () => {
     state.sourceProductId = elements.sourceProductId.value.trim();
     if (!state.batch || !state.basePlanId) {
@@ -616,7 +669,7 @@ export function initObsidianPublishing({
       if (latestDraft && !elements.diagnosticDraftId.value) {
         elements.diagnosticDraftId.value = latestDraft.draftProductId;
       }
-      elements.diagnoseSellingPoints.disabled = false;
+      syncCalibrationControls();
       text(
         elements.sourceStatus,
         `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；已完成 ${state.completedDrafts.length} 个，待办 ${state.variants.length} 个；未修改商品。`,
@@ -631,8 +684,9 @@ export function initObsidianPublishing({
   });
   elements.diagnoseSellingPoints.addEventListener('click', async () => {
     const draftProductId = elements.diagnosticDraftId.value.trim();
-    if (!state.sourceContext || !/^\d+$/.test(draftProductId)) {
-      text(elements.sellingPointStatus, '请先读取母商品并填写已有草稿 ID。');
+    const readiness = sellingPointCalibrationState(state, draftProductId);
+    if (!readiness.ready) {
+      text(elements.sellingPointStatus, readiness.message);
       return;
     }
     elements.diagnoseSellingPoints.disabled = true;
@@ -663,7 +717,7 @@ export function initObsidianPublishing({
       }
       text(elements.sellingPointStatus, error.message);
     } finally {
-      elements.diagnoseSellingPoints.disabled = false;
+      syncCalibrationControls({ updateMessage: false });
     }
   });
   elements.confirmSellingPoint.addEventListener('click', async () => {
@@ -925,6 +979,8 @@ export function initObsidianPublishing({
       button.textContent = '重新读取并核对';
     }
   });
+
+  syncCalibrationControls();
 
   renderBatchList();
   renderPlans();

@@ -6,6 +6,7 @@ import {
   buildSharedImageAssignments,
   commonSellingPointCandidate,
   createObsidianPublishingState,
+  draftsForBatch,
   formatBatchLoadStatus,
   formatDraftVerification,
   formatPreviewSuccess,
@@ -19,6 +20,7 @@ import {
   prepareReplacementVariant,
   remainingPlans,
   resolveUploadedImages,
+  sellingPointCalibrationState,
   uniqueAssignmentImages,
 } from '../public/obsidian-publishing.js';
 
@@ -259,6 +261,53 @@ test('chooseBatchAfterRefresh preserves a loaded batch and clears it only when u
   });
   assert.deepEqual(chooseBatchAfterRefresh(batches, 'missing.md'), {
     selectedPath: 'newer.md', keepLoadedBatch: false,
+  });
+});
+
+test('draftsForBatch shows only drafts belonging to the loaded Markdown batch', () => {
+  const drafts = [
+    { taskId: 'shirt', relativePath: '2026-08-25/反光T恤4.md' },
+    { taskId: 'pants', relativePath: '2026-08-28/反光裤子3.md' },
+  ];
+
+  assert.deepEqual(
+    draftsForBatch(drafts, { source: { relativePath: '2026-08-28/反光裤子3.md' } }),
+    [drafts[1]],
+  );
+  assert.deepEqual(draftsForBatch(drafts, null), []);
+});
+
+test('sellingPointCalibrationState explains every prerequisite before read-only diagnosis', () => {
+  const batch = { source: { relativePath: '2026-08-28/反光裤子3.md' } };
+
+  assert.deepEqual(sellingPointCalibrationState({ batch }, ''), {
+    canAttempt: false,
+    ready: false,
+    message: '请先填写数字格式的已有草稿 ID。',
+  });
+  assert.match(
+    sellingPointCalibrationState({ batch, basePlanId: '' }, '1601936022712').message,
+    /选择已经发布的母商品方案/,
+  );
+  assert.match(
+    sellingPointCalibrationState({ batch, basePlanId: 'plan-1', sourceProductId: '' }, '1601936022712').message,
+    /填写阿里国际站母商品 ID/,
+  );
+  assert.match(
+    sellingPointCalibrationState({
+      batch, basePlanId: 'plan-1', sourceProductId: '1601936000000', sourceContext: null,
+    }, '1601936022712').message,
+    /只读加载母商品 Schema/,
+  );
+  assert.deepEqual(sellingPointCalibrationState({
+    batch,
+    basePlanId: 'plan-1',
+    sourceProductId: '1601936000000',
+    sourceContext: { categoryId: '301504' },
+  }, '1601936022712'), {
+    canAttempt: true,
+    ready: true,
+    message: '准备就绪，可以只读校准卖点字段。',
   });
 });
 
