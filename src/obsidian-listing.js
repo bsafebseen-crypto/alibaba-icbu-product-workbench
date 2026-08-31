@@ -95,7 +95,6 @@ function parseBodyPlan(section, planNumber) {
   if (questionMatches.length !== 5) {
     throw new Error(`方案 ${planNumber} 的 FAQs 必须正好包含 5 条，实际包含 ${questionMatches.length} 条`);
   }
-  let lastFaqAnswerEnd = faqsBounds.contentStart;
   const faqs = questionMatches.map((questionMatch, index) => {
     const answerStart = questionMatch.index + questionMatch[0].length;
     const answerEnd = questionMatches[index + 1]?.index ?? faqsSection.length;
@@ -103,9 +102,6 @@ function parseBodyPlan(section, planNumber) {
     const answerMatch = /^[ \t]*\*\*A:\*\*[ \t]*(.*?)[ \t]*$/im.exec(answerSection);
     if (!answerMatch || !answerMatch[1].trim()) {
       throw new Error(`方案 ${planNumber} FAQ ${questionMatch[1]} 缺少 Answer`);
-    }
-    if (index === questionMatches.length - 1) {
-      lastFaqAnswerEnd = faqsBounds.contentStart + answerStart + answerMatch.index + answerMatch[0].length;
     }
     return { question: questionMatch[2].trim(), answer: answerMatch[1].trim() };
   });
@@ -130,7 +126,9 @@ function parseBodyPlan(section, planNumber) {
     const lastPointEnd = lastPoint
       ? sellingBounds.contentStart + lastPoint.index + lastPoint[0].length
       : sellingBounds.contentStart;
-    const startsAfterFaqs = start >= lastFaqAnswerEnd && start < sellingBounds.heading.index;
+    const startsAfterFaqs = start >= faqsBounds.contentStart
+      && start < sellingBounds.heading.index
+      && !section.slice(start + SELLING_POINTS_START_MARKER.length, faqsBounds.contentEnd).trim();
     const startsInsideSellingPoints = start >= sellingBounds.contentStart
       && start < sellingBounds.contentEnd;
     if ((!startsAfterFaqs && !startsInsideSellingPoints)

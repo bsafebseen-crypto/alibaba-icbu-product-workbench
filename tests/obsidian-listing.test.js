@@ -412,6 +412,25 @@ test('body parser accepts a selling-points marker after FAQs around an optional 
   assert.doesNotMatch(batch.plans[0].sellingPoints, /Keep this explanatory text/);
 });
 
+test('body parser rejects a selling-points marker before the final FAQ keyword annotation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-before-faq-keyword-'));
+  const markdown = bodyMarkdown()
+    .replace(
+      '   **A:** Plan 1 Answer 5.\n   **埋入关键词:** keyword 5',
+      '   **A:** Plan 1 Answer 5.\n<!-- selling-points:start -->\n   **埋入关键词:** keyword 5',
+    )
+    .replace(
+      '• Plan 1 Point 5: Body selling point 5.\n## 方案 2：正文方案',
+      '• Plan 1 Point 5: Body selling point 5.\n<!-- selling-points:end -->\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /selling-points 标记必须只包围当前方案的 Selling Points 区段/,
+  );
+});
+
 test('readObsidianBatch rejects a managed selling-point block without exactly five bullets', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-points-'));
   const markdown = markdownFor(validPayload()).replace(
