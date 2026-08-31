@@ -134,6 +134,7 @@ test('readObsidianBatch preserves batchId from an identity-only legacy block', a
 
   assert.equal(batch.batchId, 'stable-identity-001');
   assert.equal(batch.plans[0].title, 'Reflective Product Body Plan 1');
+  assert.deepEqual(batch.source.warnings, []);
 });
 
 test('readObsidianBatch preserves batchId but ignores structurally unusable stale legacy plans', async () => {
@@ -319,6 +320,22 @@ test('body parser does not consume bullets from a later level-four section', asy
   );
 });
 
+test('body parser stops at an indented later Markdown heading', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-indented-selling-boundary-'));
+  const markdown = bodyMarkdown()
+    .replace('• Plan 1 Point 5: Body selling point 5.\n', '')
+    .replace(
+      '## 方案 2：正文方案',
+      '  #### Chinese Translation\n\n  - 不应进入卖点\n\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /方案 1 的 Selling Points 必须正好包含 5 条，实际包含 4 条/,
+  );
+});
+
 test('body parser rejects an unmatched selling-points marker', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-'));
   const markdown = bodyMarkdown().replace(
@@ -330,6 +347,33 @@ test('body parser rejects an unmatched selling-points marker', async () => {
   await assert.rejects(
     () => readObsidianBatch(root, 'body.md'),
     /方案 1 的 selling-points 标记必须成对出现/,
+  );
+});
+
+test('body parser rejects selling-points markers outside all plans', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-before-plan-'));
+  const markdown = `<!-- selling-points:start -->\n<!-- selling-points:end -->\n${bodyMarkdown()}`;
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /selling-points 标记必须位于方案区段内/,
+  );
+});
+
+test('body parser rejects a selling-points marker pair that spans a later section', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-spans-section-'));
+  const markdown = bodyMarkdown()
+    .replace('#### Selling Points', '<!-- selling-points:start -->\n#### Selling Points')
+    .replace(
+      '• Plan 1 Point 5: Body selling point 5.\n## 方案 2：正文方案',
+      '• Plan 1 Point 5: Body selling point 5.\n\n#### Chinese Translation\n\n- 不应被注释包围\n\n<!-- selling-points:end -->\n\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /selling-points 标记必须只包围当前方案的 Selling Points 区段/,
   );
 });
 

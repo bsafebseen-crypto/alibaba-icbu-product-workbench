@@ -42,18 +42,31 @@ function readLegacyPayload(markdown) {
   }
 }
 
-function sectionBetween(markdown, headingPattern, nextHeadingPattern = /^#{2,3}\s+.+$/gm) {
+function isIdentityOnlyLegacyPayload(payload) {
+  return payload
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && Object.keys(payload).length === 1
+    && Object.hasOwn(payload, 'batchId');
+}
+
+function sectionBounds(markdown, headingPattern, nextHeadingPattern = /^[ \t]{0,3}#{2,3}\s+.+$/gm) {
   const heading = headingPattern.exec(markdown);
   if (!heading) return null;
   const contentStart = heading.index + heading[0].length;
   const nextHeading = nextHeadingPattern;
   nextHeading.lastIndex = contentStart;
   const next = nextHeading.exec(markdown);
-  const marker = markdown.indexOf(SELLING_POINTS_END_MARKER, contentStart);
-  const contentEnd = [next?.index, marker >= 0 ? marker : undefined]
-    .filter((value) => value !== undefined)
-    .reduce((end, value) => Math.min(end, value), markdown.length);
-  return markdown.slice(contentStart, contentEnd);
+  return {
+    heading,
+    contentStart,
+    contentEnd: next?.index ?? markdown.length,
+  };
+}
+
+function sectionBetween(markdown, headingPattern, nextHeadingPattern) {
+  const bounds = sectionBounds(markdown, headingPattern, nextHeadingPattern);
+  return bounds ? markdown.slice(bounds.contentStart, bounds.contentEnd) : null;
 }
 
 function parseBodyPlan(section, planNumber) {
@@ -62,7 +75,7 @@ function parseBodyPlan(section, planNumber) {
     .filter(Boolean);
   if (titleLines.length !== 1) throw new Error(`方案 ${planNumber} 缺少 Title`);
 
-  const attributesSection = sectionBetween(section, /^###\s+10 Custom Attributes\s*$/im);
+  const attributesSection = sectionBetween(section, /^[ \t]{0,3}###\s+10 Custom Attributes\s*$/im);
   if (attributesSection === null) throw new Error(`方案 ${planNumber} 缺少 Custom Attributes`);
   const attributes = [...attributesSection.matchAll(/^[ \t]*(\d+)\.[ \t]+([^:\r\n]+):[ \t]*(.*?)[ \t]*$/gm)]
     .map((match) => ({ name: match[2].trim(), value: match[3].trim() }))
@@ -71,7 +84,7 @@ function parseBodyPlan(section, planNumber) {
     throw new Error(`方案 ${planNumber} 的 Custom Attributes 必须正好包含 10 条，实际包含 ${attributes.length} 条`);
   }
 
-  const faqsSection = sectionBetween(section, /^###\s+5 FAQs\s*$/im);
+  const faqsSection = sectionBetween(section, /^[ \t]{0,3}###\s+5 FAQs\s*$/im);
   if (faqsSection === null) throw new Error(`方案 ${planNumber} 缺少 FAQs`);
   const questionMatches = [...faqsSection.matchAll(/^[ \t]*(\d+)\.[ \t]+\*\*Q:\*\*[ \t]*(.*?)[ \t]*$/gim)];
   if (questionMatches.length !== 5) {
@@ -93,21 +106,28 @@ function parseBodyPlan(section, planNumber) {
   if (sellingMarkerStarts !== sellingMarkerEnds || sellingMarkerStarts > 1) {
     throw new Error(`方案 ${planNumber} 的 selling-points 标记必须成对出现`);
   }
-  const sellingHeading = /^####\s+Selling Points\s*$/im.exec(section);
+  const sellingBounds = sectionBounds(
+    section,
+    /^[ \t]{0,3}####\s+Selling Points\s*$/im,
+    /^[ \t]{0,3}#{1,6}\s+.+$/gm,
+  );
+  if (!sellingBounds) throw new Error(`方案 ${planNumber} 缺少 Selling Points`);
+  const sellingPointsSection = section.slice(sellingBounds.contentStart, sellingBounds.contentEnd);
+  const pointMatches = [...sellingPointsSection.matchAll(/^[ \t]*[•*-][ \t]+(.+?)[ \t]*$/gm)];
   if (sellingMarkerStarts === 1) {
     const start = section.indexOf(SELLING_POINTS_START_MARKER);
     const end = section.indexOf(SELLING_POINTS_END_MARKER);
-    if (!sellingHeading || start > sellingHeading.index || end < sellingHeading.index + sellingHeading[0].length) {
-      throw new Error(`方案 ${planNumber} 的 selling-points 标记必须包围 Selling Points 区段`);
+    const lastPoint = pointMatches.at(-1);
+    const lastPointEnd = lastPoint
+      ? sellingBounds.contentStart + lastPoint.index + lastPoint[0].length
+      : sellingBounds.contentStart;
+    if (start > sellingBounds.heading.index
+      || end < lastPointEnd
+      || end > sellingBounds.contentEnd) {
+      throw new Error(`方案 ${planNumber} 的 selling-points 标记必须只包围当前方案的 Selling Points 区段`);
     }
   }
-  const sellingPointsSection = sectionBetween(
-    section,
-    /^####\s+Selling Points\s*$/im,
-    /^#{1,6}\s+.+$/gm,
-  );
-  if (sellingPointsSection === null) throw new Error(`方案 ${planNumber} 缺少 Selling Points`);
-  const points = [...sellingPointsSection.matchAll(/^[ \t]*[•*-][ \t]+(.+?)[ \t]*$/gm)]
+  const points = pointMatches
     .map((match) => match[1].trim())
     .filter(Boolean);
   if (points.length !== 5) {
@@ -123,20 +143,34 @@ function parseBodyPlan(section, planNumber) {
   };
 }
 
+function validateSellingPointMarkerScope(markdown, planMatches) {
+  for (const marker of [SELLING_POINTS_START_MARKER, SELLING_POINTS_END_MARKER]) {
+    let index = markdown.indexOf(marker);
+    while (index >= 0) {
+      const insidePlan = planMatches.some((match, planIndex) => (
+        index >= match.index && index < (planMatches[planIndex + 1]?.index ?? markdown.length)
+      ));
+      if (!insidePlan) throw new Error('selling-points 标记必须位于方案区段内');
+      index = markdown.indexOf(marker, index + marker.length);
+    }
+  }
+}
+
 export function parseListingBody(markdown, source = {}, legacyPayload = null) {
   if (typeof markdown !== 'string') throw new Error('Markdown 内容必须是字符串');
   const machineStart = markdown.indexOf(START_MARKER);
   const humanMarkdown = machineStart >= 0 ? markdown.slice(0, machineStart) : markdown;
-  const matches = [...humanMarkdown.matchAll(/^##\s+方案\s+(\d+)(?:[：:].*)?$/gm)];
+  const matches = [...humanMarkdown.matchAll(/^[ \t]{0,3}##\s+方案\s+(\d+)(?:[：:].*)?$/gm)];
   const numbers = matches.map((match) => match[1]);
   if (matches.length !== 5 || numbers.join(',') !== '1,2,3,4,5') {
     throw new Error('方案编号必须恰好为 1、2、3、4、5');
   }
+  validateSellingPointMarkerScope(humanMarkdown, matches);
   const plans = matches.map((match, index) => {
     const end = matches[index + 1]?.index ?? humanMarkdown.length;
     return parseBodyPlan(humanMarkdown.slice(match.index, end), Number(match[1]));
   });
-  const heading = /^#\s+(.+?)(?:\s+国际站发品方案)?\s*$/m.exec(humanMarkdown)?.[1]?.trim();
+  const heading = /^[ \t]{0,3}#\s+(.+?)(?:\s+国际站发品方案)?\s*$/m.exec(humanMarkdown)?.[1]?.trim();
   const fallbackName = path.parse(source.fileName || 'Obsidian Listing').name;
   const pathKey = String(source.relativePath || source.fileName || fallbackName).replaceAll('\\', '/');
   const fallbackId = `obsidian-${createHash('sha256').update(pathKey).digest('hex').slice(0, 16)}`;
@@ -319,11 +353,13 @@ export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativ
     } catch (error) {
       warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
     }
-    try {
-      comparableLegacyPlans = validateListingBatch(legacy.payload).plans;
-    } catch (error) {
-      if (!warnings.some((warning) => warning.includes(error.message))) {
-        warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
+    if (!isIdentityOnlyLegacyPayload(legacy.payload)) {
+      try {
+        comparableLegacyPlans = validateListingBatch(legacy.payload).plans;
+      } catch (error) {
+        if (!warnings.some((warning) => warning.includes(error.message))) {
+          warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
+        }
       }
     }
   }

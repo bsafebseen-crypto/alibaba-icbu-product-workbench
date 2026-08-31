@@ -335,4 +335,3 @@ git commit -m "fix: accept generated Obsidian listing bodies"
 ```
 
 If acceptance passes without changes, do not create an empty commit.
-
