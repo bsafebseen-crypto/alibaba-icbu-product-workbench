@@ -52,8 +52,8 @@ function markdownFor(payload) {
       `   **埋入关键词:** keyword ${index + 1}`,
     ]),
     '',
-    '<!-- selling-points:start -->',
     '#### Selling Points',
+    '<!-- selling-points:start -->',
     '',
     ...plan.sellingPoints.split('\n').map((point) => `• ${point}`),
     '<!-- selling-points:end -->',
@@ -368,6 +368,22 @@ test('body parser rejects a selling-points marker pair that spans a later sectio
     .replace(
       '• Plan 1 Point 5: Body selling point 5.\n## 方案 2：正文方案',
       '• Plan 1 Point 5: Body selling point 5.\n\n#### Chinese Translation\n\n- 不应被注释包围\n\n<!-- selling-points:end -->\n\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /selling-points 标记必须只包围当前方案的 Selling Points 区段/,
+  );
+});
+
+test('body parser rejects a selling-points marker that starts before custom attributes', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-early-start-'));
+  const markdown = bodyMarkdown()
+    .replace('### 10 Custom Attributes', '<!-- selling-points:start -->\n### 10 Custom Attributes')
+    .replace(
+      '• Plan 1 Point 5: Body selling point 5.\n## 方案 2：正文方案',
+      '• Plan 1 Point 5: Body selling point 5.\n<!-- selling-points:end -->\n## 方案 2：正文方案',
     );
   await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
 

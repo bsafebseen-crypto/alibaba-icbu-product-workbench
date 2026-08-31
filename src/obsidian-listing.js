@@ -121,7 +121,8 @@ function parseBodyPlan(section, planNumber) {
     const lastPointEnd = lastPoint
       ? sellingBounds.contentStart + lastPoint.index + lastPoint[0].length
       : sellingBounds.contentStart;
-    if (start > sellingBounds.heading.index
+    if (start < sellingBounds.contentStart
+      || start >= sellingBounds.contentEnd
       || end < lastPointEnd
       || end > sellingBounds.contentEnd) {
       throw new Error(`方案 ${planNumber} 的 selling-points 标记必须只包围当前方案的 Selling Points 区段`);
