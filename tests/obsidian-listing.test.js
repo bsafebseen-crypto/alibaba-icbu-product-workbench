@@ -393,6 +393,25 @@ test('body parser rejects a selling-points marker that starts before custom attr
   );
 });
 
+test('body parser accepts a selling-points marker after FAQs around an optional strategy section', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-strategy-'));
+  const markdown = bodyMarkdown()
+    .replace(
+      '#### Selling Points',
+      '<!-- selling-points:start -->\n#### Selling Point Strategy\n\nKeep this explanatory text out of Alibaba.\n\n#### Selling Points',
+    )
+    .replace(
+      '• Plan 1 Point 5: Body selling point 5.\n## 方案 2：正文方案',
+      '• Plan 1 Point 5: Body selling point 5.\n<!-- selling-points:end -->\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  const batch = await readObsidianBatch(root, 'body.md');
+
+  assert.equal(batch.plans[0].sellingPoints.split('\n').length, 5);
+  assert.doesNotMatch(batch.plans[0].sellingPoints, /Keep this explanatory text/);
+});
+
 test('readObsidianBatch rejects a managed selling-point block without exactly five bullets', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-points-'));
   const markdown = markdownFor(validPayload()).replace(

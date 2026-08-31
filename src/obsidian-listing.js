@@ -84,12 +84,18 @@ function parseBodyPlan(section, planNumber) {
     throw new Error(`方案 ${planNumber} 的 Custom Attributes 必须正好包含 10 条，实际包含 ${attributes.length} 条`);
   }
 
-  const faqsSection = sectionBetween(section, /^[ \t]{0,3}###\s+5 FAQs\s*$/im);
-  if (faqsSection === null) throw new Error(`方案 ${planNumber} 缺少 FAQs`);
+  const faqsBounds = sectionBounds(
+    section,
+    /^[ \t]{0,3}###\s+5 FAQs\s*$/im,
+    /^[ \t]{0,3}#{1,6}\s+.+$/gm,
+  );
+  if (!faqsBounds) throw new Error(`方案 ${planNumber} 缺少 FAQs`);
+  const faqsSection = section.slice(faqsBounds.contentStart, faqsBounds.contentEnd);
   const questionMatches = [...faqsSection.matchAll(/^[ \t]*(\d+)\.[ \t]+\*\*Q:\*\*[ \t]*(.*?)[ \t]*$/gim)];
   if (questionMatches.length !== 5) {
     throw new Error(`方案 ${planNumber} 的 FAQs 必须正好包含 5 条，实际包含 ${questionMatches.length} 条`);
   }
+  let lastFaqAnswerEnd = faqsBounds.contentStart;
   const faqs = questionMatches.map((questionMatch, index) => {
     const answerStart = questionMatch.index + questionMatch[0].length;
     const answerEnd = questionMatches[index + 1]?.index ?? faqsSection.length;
@@ -97,6 +103,9 @@ function parseBodyPlan(section, planNumber) {
     const answerMatch = /^[ \t]*\*\*A:\*\*[ \t]*(.*?)[ \t]*$/im.exec(answerSection);
     if (!answerMatch || !answerMatch[1].trim()) {
       throw new Error(`方案 ${planNumber} FAQ ${questionMatch[1]} 缺少 Answer`);
+    }
+    if (index === questionMatches.length - 1) {
+      lastFaqAnswerEnd = faqsBounds.contentStart + answerStart + answerMatch.index + answerMatch[0].length;
     }
     return { question: questionMatch[2].trim(), answer: answerMatch[1].trim() };
   });
@@ -121,8 +130,10 @@ function parseBodyPlan(section, planNumber) {
     const lastPointEnd = lastPoint
       ? sellingBounds.contentStart + lastPoint.index + lastPoint[0].length
       : sellingBounds.contentStart;
-    if (start < sellingBounds.contentStart
-      || start >= sellingBounds.contentEnd
+    const startsAfterFaqs = start >= lastFaqAnswerEnd && start < sellingBounds.heading.index;
+    const startsInsideSellingPoints = start >= sellingBounds.contentStart
+      && start < sellingBounds.contentEnd;
+    if ((!startsAfterFaqs && !startsInsideSellingPoints)
       || end < lastPointEnd
       || end > sellingBounds.contentEnd) {
       throw new Error(`方案 ${planNumber} 的 selling-points 标记必须只包围当前方案的 Selling Points 区段`);
