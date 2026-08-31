@@ -125,6 +125,33 @@ test('body content wins when a legacy machine block is stale', async () => {
   assert.deepEqual(batch.source.warnings, ['机器数据块内容已过期，当前按正文读取']);
 });
 
+test('readObsidianBatch preserves batchId from an identity-only legacy block', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-legacy-identity-'));
+  const machine = '<!-- alibaba-listing-batch:start -->\n```json\n{"batchId":"stable-identity-001"}\n```\n<!-- alibaba-listing-batch:end -->';
+  await writeFile(path.join(root, 'body.md'), `${bodyMarkdown()}\n${machine}`, 'utf8');
+
+  const batch = await readObsidianBatch(root, 'body.md');
+
+  assert.equal(batch.batchId, 'stable-identity-001');
+  assert.equal(batch.plans[0].title, 'Reflective Product Body Plan 1');
+});
+
+test('readObsidianBatch preserves batchId but ignores structurally unusable stale legacy plans', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-legacy-unusable-'));
+  const legacy = validPayload();
+  legacy.batchId = 'stable-stale-001';
+  legacy.plans.pop();
+  const machine = `<!-- alibaba-listing-batch:start -->\n\`\`\`json\n${JSON.stringify(legacy)}\n\`\`\`\n<!-- alibaba-listing-batch:end -->`;
+  await writeFile(path.join(root, 'body.md'), `${bodyMarkdown()}\n${machine}`, 'utf8');
+
+  const batch = await readObsidianBatch(root, 'body.md');
+
+  assert.equal(batch.batchId, 'stable-stale-001');
+  assert.equal(batch.plans[0].title, 'Reflective Product Body Plan 1');
+  assert.match(batch.source.warnings.join('\n'), /机器数据块无效/);
+  assert.doesNotMatch(batch.source.warnings.join('\n'), /内容已过期/);
+});
+
 test('readObsidianBatch loads valid body content when legacy machine JSON is malformed', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-legacy-malformed-'));
   const machine = '<!-- alibaba-listing-batch:start -->\n```json\n{invalid\n```\n<!-- alibaba-listing-batch:end -->';
@@ -274,6 +301,36 @@ test('body parser reports a selling-point count with the exact plan', async () =
   const markdown = bodyMarkdown().replace('• Plan 1 Point 5: Body selling point 5.\n', '');
   await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
   await assert.rejects(() => readObsidianBatch(root, 'body.md'), /方案 1.*5.*实际.*4/);
+});
+
+test('body parser does not consume bullets from a later level-four section', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-boundary-'));
+  const markdown = bodyMarkdown()
+    .replace('• Plan 1 Point 5: Body selling point 5.\n', '')
+    .replace(
+      '## 方案 2：正文方案',
+      '#### Chinese Translation\n\n- 不应进入卖点\n\n## 方案 2：正文方案',
+    );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /方案 1 的 Selling Points 必须正好包含 5 条，实际包含 4 条/,
+  );
+});
+
+test('body parser rejects an unmatched selling-points marker', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-selling-marker-'));
+  const markdown = bodyMarkdown().replace(
+    '#### Selling Points',
+    '<!-- selling-points:start -->\n#### Selling Points',
+  );
+  await writeFile(path.join(root, 'body.md'), markdown, 'utf8');
+
+  await assert.rejects(
+    () => readObsidianBatch(root, 'body.md'),
+    /方案 1 的 selling-points 标记必须成对出现/,
+  );
 });
 
 test('readObsidianBatch rejects a managed selling-point block without exactly five bullets', async () => {

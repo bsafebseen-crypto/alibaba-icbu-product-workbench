@@ -4,6 +4,7 @@ import path from 'node:path';
 
 const START_MARKER = '<!-- alibaba-listing-batch:start -->';
 const END_MARKER = '<!-- alibaba-listing-batch:end -->';
+const SELLING_POINTS_START_MARKER = '<!-- selling-points:start -->';
 const SELLING_POINTS_END_MARKER = '<!-- selling-points:end -->';
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 
@@ -41,11 +42,11 @@ function readLegacyPayload(markdown) {
   }
 }
 
-function sectionBetween(markdown, headingPattern) {
+function sectionBetween(markdown, headingPattern, nextHeadingPattern = /^#{2,3}\s+.+$/gm) {
   const heading = headingPattern.exec(markdown);
   if (!heading) return null;
   const contentStart = heading.index + heading[0].length;
-  const nextHeading = /^#{2,3}\s+.+$/gm;
+  const nextHeading = nextHeadingPattern;
   nextHeading.lastIndex = contentStart;
   const next = nextHeading.exec(markdown);
   const marker = markdown.indexOf(SELLING_POINTS_END_MARKER, contentStart);
@@ -87,7 +88,24 @@ function parseBodyPlan(section, planNumber) {
     return { question: questionMatch[2].trim(), answer: answerMatch[1].trim() };
   });
 
-  const sellingPointsSection = sectionBetween(section, /^####\s+Selling Points\s*$/im);
+  const sellingMarkerStarts = section.split(SELLING_POINTS_START_MARKER).length - 1;
+  const sellingMarkerEnds = section.split(SELLING_POINTS_END_MARKER).length - 1;
+  if (sellingMarkerStarts !== sellingMarkerEnds || sellingMarkerStarts > 1) {
+    throw new Error(`方案 ${planNumber} 的 selling-points 标记必须成对出现`);
+  }
+  const sellingHeading = /^####\s+Selling Points\s*$/im.exec(section);
+  if (sellingMarkerStarts === 1) {
+    const start = section.indexOf(SELLING_POINTS_START_MARKER);
+    const end = section.indexOf(SELLING_POINTS_END_MARKER);
+    if (!sellingHeading || start > sellingHeading.index || end < sellingHeading.index + sellingHeading[0].length) {
+      throw new Error(`方案 ${planNumber} 的 selling-points 标记必须包围 Selling Points 区段`);
+    }
+  }
+  const sellingPointsSection = sectionBetween(
+    section,
+    /^####\s+Selling Points\s*$/im,
+    /^#{1,6}\s+.+$/gm,
+  );
   if (sellingPointsSection === null) throw new Error(`方案 ${planNumber} 缺少 Selling Points`);
   const points = [...sellingPointsSection.matchAll(/^[ \t]*[•*-][ \t]+(.+?)[ \t]*$/gm)]
     .map((match) => match[1].trim())
@@ -293,18 +311,25 @@ export async function readObsidianBatch(rootDir = DEFAULT_OBSIDIAN_ROOT, relativ
   };
   const legacy = readLegacyPayload(markdown);
   const warnings = [...legacy.warnings];
-  let legacyPayload = legacy.payload;
-  if (legacyPayload) {
+  let legacyIdentity = null;
+  let comparableLegacyPlans = null;
+  if (legacy.payload) {
     try {
-      legacyPayload = validateListingBatch(legacyPayload);
+      legacyIdentity = { batchId: requireString(legacy.payload.batchId, 'batchId') };
     } catch (error) {
-      legacyPayload = null;
       warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
+    }
+    try {
+      comparableLegacyPlans = validateListingBatch(legacy.payload).plans;
+    } catch (error) {
+      if (!warnings.some((warning) => warning.includes(error.message))) {
+        warnings.push(`机器数据块无效，当前按正文读取：${error.message}`);
+      }
     }
   }
 
-  const batch = parseListingBody(markdown, source, legacyPayload);
-  if (legacyPayload && JSON.stringify(legacyPayload.plans) !== JSON.stringify(batch.plans)) {
+  const batch = parseListingBody(markdown, source, legacyIdentity);
+  if (comparableLegacyPlans && JSON.stringify(comparableLegacyPlans) !== JSON.stringify(batch.plans)) {
     warnings.push('机器数据块内容已过期，当前按正文读取');
   }
   return {

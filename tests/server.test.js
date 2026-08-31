@@ -578,7 +578,7 @@ test('POST /api/obsidian/source-product loads read-only context and schema analy
 });
 
 test('photobank cache routes recover a successful digest-backed upload', async () => {
-  const sha256 = 'a'.repeat(64);
+  const sha256 = '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81';
   await withServer(async (baseUrl) => {
     const upload = await fetch(`${baseUrl}/api/alibaba/photobank/upload`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -606,6 +606,32 @@ test('photobank cache routes recover a successful digest-backed upload', async (
       fileName: 'main.jpg', fileId: 'file-1',
       photobankUrl: 'https://img.example.com/main.jpg', requestId: 'request-1',
     }),
+  });
+});
+
+test('POST /api/alibaba/photobank/upload rejects a digest that does not match decoded bytes', async () => {
+  let uploadCalls = 0;
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/alibaba/photobank/upload`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' },
+        image: {
+          fileName: 'main.jpg',
+          dataUrl: 'data:image/jpeg;base64,AQID',
+          sha256: 'a'.repeat(64),
+        },
+      }),
+    });
+
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /图片内容指纹不匹配/);
+    assert.equal(uploadCalls, 0);
+  }, {
+    uploadAlibabaPhoto: async () => {
+      uploadCalls += 1;
+      return { fileId: 'must-not-upload', photobankUrl: 'https://img.invalid' };
+    },
   });
 });
 
@@ -747,6 +773,27 @@ test('POST /api/obsidian/selling-points/binding requires confirmation and stores
     });
     const raw = await readFile(path.join(rootDir, 'data', 'alibaba-schema-bindings.json'), 'utf8');
     assert.doesNotMatch(raw, /must-not-persist|accessToken|itemSchema|Source summary/);
+  }, {
+    loadAlibabaProductContext: async () => ({
+      categoryId: '301504', language: 'en', version: 'trade.1.1', schemaXml,
+    }),
+  });
+});
+
+test('POST /api/obsidian/selling-points/binding rejects title and price fields', async () => {
+  const schemaXml = '<itemSchema><field id="subject" name="Product Title"><value>Title</value></field><field id="price" name="Price"><value>9.99</value></field></itemSchema>';
+  await withServer(async (baseUrl) => {
+    for (const fieldId of ['subject', 'price']) {
+      const response = await fetch(`${baseUrl}/api/obsidian/selling-points/binding`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          config: { appKey: 'key' }, sourceProductId: '1601933369105', confirmed: true,
+          binding: { fieldId, carrierPath: ['value'], structureType: 'single-text' },
+        }),
+      });
+      assert.equal(response.status, 400);
+      assert.match((await response.json()).error, /真实卖点候选字段/);
+    }
   }, {
     loadAlibabaProductContext: async () => ({
       categoryId: '301504', language: 'en', version: 'trade.1.1', schemaXml,
@@ -984,6 +1031,60 @@ test('POST /api/obsidian/draft requires confirmation and creates one fingerprint
       assert.equal(input.schemaXml, '<preview />');
       assert.equal(input.publishContext.categoryId, '32905');
       return { productId: 'draft-variant-1', traceId: 'trace-1', requestId: 'request-1' };
+    },
+  });
+});
+
+test('POST /api/obsidian/draft rejects a preview session after the persisted selling-point binding changes', async () => {
+  let bindingReads = 0;
+  let draftCalls = 0;
+  await withServer(async (baseUrl) => {
+    const previewResponse = await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base',
+        sourceContext: {
+          sourceProductId: '1601915922577', sourceProductType: 'sourcing',
+          categoryId: '32905', language: 'en_US', publishType: 'default',
+          version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        planIds: ['variant-1'], sellingPointBinding,
+        imagesByPlan: {
+          'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+        },
+      }),
+    });
+    assert.equal(previewResponse.status, 200);
+    const prepared = await previewResponse.json();
+
+    const response = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' }, sessionId: prepared.sessionId,
+        planId: 'variant-1', fingerprint: 'hash-variant-1', confirmed: true,
+      }),
+    });
+
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /卖点字段绑定已经变化/);
+    assert.equal(draftCalls, 0);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => {
+      bindingReads += 1;
+      return bindingReads === 1
+        ? sellingPointBinding
+        : { ...sellingPointBinding, fieldId: 'changedSellingPoints' };
+    },
+    validateSellingPointBinding: (_schemaXml, binding) => binding,
+    createStrictProductPreview: () => ({
+      previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'],
+    }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    createAlibabaProductDraft: async () => {
+      draftCalls += 1;
+      return { productId: 'must-not-create' };
     },
   });
 });

@@ -79,10 +79,8 @@ function carrierPaths(value, currentPath = [], results = []) {
   return results;
 }
 
-export function summarizeSellingPointCandidates(schemaXml) {
-  const xml = String(schemaXml || '');
-  if (XMLValidator.validate(xml) !== true) throw new Error('Schema XML 无效');
-  const fields = collectFields(parser.parse(xml));
+function sellingPointCandidates(tree) {
+  const fields = collectFields(tree);
   return fields.flatMap((field) => {
     const fieldId = String(field?.['@_id'] || '').trim();
     const fieldName = String(field?.['@_name'] || '').trim();
@@ -100,10 +98,26 @@ export function summarizeSellingPointCandidates(schemaXml) {
   });
 }
 
+export function summarizeSellingPointCandidates(schemaXml) {
+  const xml = String(schemaXml || '');
+  if (XMLValidator.validate(xml) !== true) throw new Error('Schema XML 无效');
+  return sellingPointCandidates(parser.parse(xml));
+}
+
 export function validateSellingPointBinding(schemaXml, binding) {
   const xml = String(schemaXml || '');
   if (XMLValidator.validate(xml) !== true) throw new Error('Schema XML 无效');
-  return resolveSellingPointBinding(parser.parse(xml), binding);
+  const tree = parser.parse(xml);
+  const normalized = normalizeBinding(binding);
+  const diagnosed = sellingPointCandidates(tree).filter((candidate) => (
+    candidate.fieldId === normalized.fieldId
+    && candidate.structureType === 'single-text'
+    && candidate.carrierPaths.length === 1
+    && JSON.stringify(candidate.carrierPaths[0]) === JSON.stringify(normalized.carrierPath)
+  ));
+  if (diagnosed.length !== 1) throw new Error('绑定字段不是唯一的真实卖点候选字段');
+  const resolved = resolveSellingPointBinding(tree, binding);
+  return resolved;
 }
 
 function bindingFile(rootDir) {

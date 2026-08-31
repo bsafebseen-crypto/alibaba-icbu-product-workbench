@@ -273,7 +273,12 @@ export function createServer(options = {}) {
         const source = await loadAlibabaProductContext(body.config, {
           productId: body.sourceProductId,
         });
-        const binding = validateSellingPointBinding(source.schemaXml, body.binding);
+        let binding;
+        try {
+          binding = validateSellingPointBinding(source.schemaXml, body.binding);
+        } catch (error) {
+          throw Object.assign(error, { status: 400 });
+        }
         const saved = await saveSellingPointBinding(rootDir, {
           ...binding,
           categoryId: source.categoryId,
@@ -426,6 +431,8 @@ export function createServer(options = {}) {
           previewSessions.set(sessionId, {
             taskId: task.id,
             context,
+            schemaXml,
+            sellingPointBinding,
             previews: new Map(previews.map((preview) => [preview.planId, {
               previewXml: preview.previewXml,
               fingerprint: preview.fingerprint,
@@ -512,6 +519,23 @@ export function createServer(options = {}) {
           throw Object.assign(new Error('预览已经变化，请重新生成并确认'), { status: 409 });
         }
 
+        const currentStoredBinding = await readSellingPointBinding(rootDir, session.context);
+        let currentBinding;
+        try {
+          currentBinding = currentStoredBinding
+            ? validateSellingPointBinding(session.schemaXml, currentStoredBinding)
+            : null;
+        } catch {
+          currentBinding = null;
+        }
+        if (!currentBinding
+          || currentBinding.fieldId !== session.sellingPointBinding.fieldId
+          || currentBinding.structureType !== session.sellingPointBinding.structureType
+          || JSON.stringify(currentBinding.carrierPath)
+            !== JSON.stringify(session.sellingPointBinding.carrierPath)) {
+          throw Object.assign(new Error('卖点字段绑定已经变化，请重新校准并生成完整预览'), { status: 409 });
+        }
+
         const capability = await getAlibabaPublishingCapability(body.config, {
           categoryId: session.context.categoryId,
           language: session.context.language,
@@ -596,6 +620,11 @@ export function createServer(options = {}) {
       if (request.method === 'POST' && url.pathname === '/api/alibaba/photobank/upload') {
         const body = await readJson(request, IMAGE_GENERATION_BODY_LIMIT);
         const decoded = decodeImageDataUrl(body.image?.dataUrl);
+        const suppliedDigest = String(body.image?.sha256 || '').trim().toLocaleLowerCase();
+        const actualDigest = crypto.createHash('sha256').update(decoded.imageBytes).digest('hex');
+        if (suppliedDigest && suppliedDigest !== actualDigest) {
+          throw Object.assign(new Error('图片内容指纹不匹配，请重新选择图片'), { status: 400 });
+        }
         const result = await uploadAlibabaPhoto(body.config, {
           fileName: body.image?.fileName,
           mimeType: decoded.mimeType,
@@ -603,9 +632,9 @@ export function createServer(options = {}) {
           groupId: body.groupId,
           extraContext: body.extraContext,
         });
-        if (body.image?.sha256) {
+        if (suppliedDigest) {
           await savePhotobankCacheEntry(rootDir, {
-            sha256: body.image.sha256,
+            sha256: actualDigest,
             fileName: body.image.fileName,
             size: decoded.imageBytes.length,
             mimeType: decoded.mimeType,

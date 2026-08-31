@@ -126,6 +126,22 @@ export function remainingPlans(batch, basePlanId) {
   return batch.plans.filter((plan) => plan.id !== basePlanId);
 }
 
+function bindingIdentity(binding) {
+  if (!binding) return '';
+  return JSON.stringify({
+    fieldId: binding.fieldId,
+    structureType: binding.structureType,
+    carrierPath: binding.carrierPath,
+  });
+}
+
+export function applySellingPointBinding(state, binding) {
+  const changed = bindingIdentity(state.sellingPointBinding) !== bindingIdentity(binding);
+  state.sellingPointBinding = binding;
+  if (changed) invalidatePreviewState(state);
+  return changed;
+}
+
 export function pendingVariants(variants = [], completedPlanIds = []) {
   const completed = new Set(completedPlanIds.map((value) => String(value)));
   return variants.filter((variant) => !completed.has(String(variant?.id || variant?.planId || '')));
@@ -138,6 +154,16 @@ export function preferredBatchPath(batches = []) {
       if (!latest) return batch;
       return Date.parse(batch.modifiedAt || '') > Date.parse(latest.modifiedAt || '') ? batch : latest;
     }, null)?.relativePath || '';
+}
+
+export function chooseBatchAfterRefresh(batches = [], loadedPath = '') {
+  const loadedStillValid = Boolean(loadedPath && batches.some((batch) => (
+    batch?.valid && batch.relativePath === loadedPath
+  )));
+  return {
+    selectedPath: loadedStillValid ? loadedPath : preferredBatchPath(batches),
+    keepLoadedBatch: loadedStillValid,
+  };
 }
 
 export function prepareReplacementVariant(allVariants = [], pending = [], planId = '') {
@@ -511,14 +537,21 @@ export function initObsidianPublishing({
     try {
       const result = await requestJson('/api/obsidian/batches');
       state.batches = result.batches;
+      const loadedPath = state.batch?.source?.relativePath || '';
+      const selection = chooseBatchAfterRefresh(state.batches, loadedPath);
       renderBatchList();
-      const preferredPath = preferredBatchPath(state.batches);
-      if (preferredPath) {
-        elements.select.value = preferredPath;
+      if (!selection.keepLoadedBatch && state.batch) {
+        state.batch = null;
+        state.basePlanId = '';
+        invalidatePreparedData();
+        renderPlans();
+      }
+      if (selection.selectedPath) {
+        elements.select.value = selection.selectedPath;
         elements.load.disabled = false;
       }
       await refreshSavedDrafts();
-      if (autoLoad && preferredPath) await loadSelectedBatch();
+      if (autoLoad && selection.selectedPath && !selection.keepLoadedBatch) await loadSelectedBatch();
       else setStatus(`已找到 ${state.batches.length} 个 Markdown 文件。`, 'success');
     } catch (error) {
       state.error = error.message;
@@ -615,7 +648,9 @@ export function initObsidianPublishing({
         }),
       });
       const candidate = commonSellingPointCandidate(state.sellingPointDiagnosis);
-      state.sellingPointBinding = candidate;
+      if (applySellingPointBinding(state, candidate)) {
+        invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
+      }
       elements.confirmSellingPoint.disabled = false;
       text(
         elements.sellingPointStatus,
@@ -623,7 +658,9 @@ export function initObsidianPublishing({
       );
     } catch (error) {
       state.sellingPointDiagnosis = null;
-      state.sellingPointBinding = null;
+      if (applySellingPointBinding(state, null)) {
+        invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
+      }
       text(elements.sellingPointStatus, error.message);
     } finally {
       elements.diagnoseSellingPoints.disabled = false;
@@ -645,7 +682,9 @@ export function initObsidianPublishing({
           confirmed: true,
         }),
       });
-      state.sellingPointBinding = result.binding;
+      if (applySellingPointBinding(state, result.binding)) {
+        invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
+      }
       text(
         elements.sellingPointStatus,
         `卖点字段已确认：${result.binding.fieldId} · ${result.binding.structureType}`,

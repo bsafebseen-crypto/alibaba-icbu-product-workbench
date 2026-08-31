@@ -12,6 +12,8 @@ import {
   imageFileKey,
   imageContentKey,
   invalidatePreviewState,
+  applySellingPointBinding,
+  chooseBatchAfterRefresh,
   pendingVariants,
   preferredBatchPath,
   prepareReplacementVariant,
@@ -225,6 +227,39 @@ test('formatDraftVerification summarizes successful and mismatched read-only che
       },
     },
   }), '发现差异：属性。属性明细：顺序不同；Attribute 3：期望“Value 3”，草稿“Changed value”；缺少 Attribute 4=Value 4；多出 Extra=Extra value。追踪号 trace-3');
+});
+
+test('applySellingPointBinding invalidates preview and draft authority when the binding changes', () => {
+  const state = createObsidianPublishingState();
+  state.sellingPointBinding = { fieldId: 'old', carrierPath: ['value'], structureType: 'single-text' };
+  state.previews = [{ planId: 'plan-1' }];
+  state.sessionId = 'session';
+  state.taskId = 'task';
+  state.draftItems = { 'plan-1': { status: 'preview_ready' } };
+
+  applySellingPointBinding(state, {
+    fieldId: 'new', carrierPath: ['value'], structureType: 'single-text',
+  });
+
+  assert.equal(state.sellingPointBinding.fieldId, 'new');
+  assert.deepEqual(
+    { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
+    { previews: [], sessionId: '', taskId: '', draftItems: {} },
+  );
+});
+
+test('chooseBatchAfterRefresh preserves a loaded batch and clears it only when unavailable', () => {
+  const batches = [
+    { relativePath: 'older.md', valid: true, modifiedAt: '2026-08-27T10:00:00.000Z' },
+    { relativePath: 'newer.md', valid: true, modifiedAt: '2026-08-28T10:00:00.000Z' },
+  ];
+
+  assert.deepEqual(chooseBatchAfterRefresh(batches, 'older.md'), {
+    selectedPath: 'older.md', keepLoadedBatch: true,
+  });
+  assert.deepEqual(chooseBatchAfterRefresh(batches, 'missing.md'), {
+    selectedPath: 'newer.md', keepLoadedBatch: false,
+  });
 });
 
 test('formatPreviewSuccess reports the actual pending preview count', () => {
