@@ -21,6 +21,7 @@ import {
   remainingPlans,
   resolveUploadedImages,
   sellingPointCalibrationState,
+  updateCalibrationIdentity,
   uniqueAssignmentImages,
 } from '../public/obsidian-publishing.js';
 
@@ -34,6 +35,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     batch: null,
     basePlanId: '',
     sourceProductId: '',
+    diagnosticDraftId: '',
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
@@ -309,6 +311,32 @@ test('sellingPointCalibrationState explains every prerequisite before read-only 
     ready: true,
     message: '准备就绪，可以只读校准卖点字段。',
   });
+});
+
+test('updateCalibrationIdentity invalidates a stale candidate and preview when either ID changes', () => {
+  const state = createObsidianPublishingState();
+  state.sourceProductId = '1601936000000';
+  state.diagnosticDraftId = '1601936022712';
+  state.sellingPointDiagnosis = { draftProductId: '1601936022712' };
+  state.sellingPointBinding = {
+    fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
+  };
+  state.previews = [{ planId: 'plan-2' }];
+  state.sessionId = 'session';
+  state.taskId = 'task';
+  state.draftItems = { 'plan-2': { status: 'preview_ready' } };
+
+  assert.equal(updateCalibrationIdentity(state, {
+    sourceProductId: '1601936000000',
+    diagnosticDraftId: '1601936999999',
+  }), true);
+  assert.equal(state.diagnosticDraftId, '1601936999999');
+  assert.equal(state.sellingPointDiagnosis, null);
+  assert.equal(state.sellingPointBinding, null);
+  assert.deepEqual(
+    { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
+    { previews: [], sessionId: '', taskId: '', draftItems: {} },
+  );
 });
 
 test('formatPreviewSuccess reports the actual pending preview count', () => {

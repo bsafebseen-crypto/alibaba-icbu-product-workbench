@@ -6,6 +6,7 @@ export function createObsidianPublishingState() {
     batch: null,
     basePlanId: '',
     sourceProductId: '',
+    diagnosticDraftId: '',
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
@@ -189,6 +190,24 @@ export function sellingPointCalibrationState(state = {}, draftProductId = '') {
     return { canAttempt: true, ready: false, message: '母商品与草稿 ID 已填写；请先点击“只读加载母商品 Schema”。' };
   }
   return { canAttempt: true, ready: true, message: '准备就绪，可以只读校准卖点字段。' };
+}
+
+export function updateCalibrationIdentity(state, {
+  sourceProductId = state.sourceProductId,
+  diagnosticDraftId = state.diagnosticDraftId,
+} = {}) {
+  const nextSourceProductId = String(sourceProductId || '').trim();
+  const nextDiagnosticDraftId = String(diagnosticDraftId || '').trim();
+  const changed = nextSourceProductId !== state.sourceProductId
+    || nextDiagnosticDraftId !== state.diagnosticDraftId;
+  state.sourceProductId = nextSourceProductId;
+  state.diagnosticDraftId = nextDiagnosticDraftId;
+  if (changed) {
+    state.sellingPointDiagnosis = null;
+    state.sellingPointBinding = null;
+    invalidatePreviewState(state);
+  }
+  return changed;
 }
 
 export function prepareReplacementVariant(allVariants = [], pending = [], planId = '') {
@@ -474,6 +493,8 @@ export function initObsidianPublishing({
     );
     elements.diagnoseSellingPoints.disabled = !readiness.canAttempt;
     elements.diagnoseSellingPoints.title = readiness.ready ? '' : readiness.message;
+    elements.confirmSellingPoint.disabled = !state.sellingPointDiagnosis
+      || !state.sellingPointBinding;
     elements.confirmSellingPoint.title = state.sellingPointBinding
       ? ''
       : '先完成只读校准，确认按钮才会启用。';
@@ -562,7 +583,7 @@ export function initObsidianPublishing({
         body: JSON.stringify({ relativePath: elements.select.value }),
       });
       state.basePlanId = '';
-      state.sourceProductId = '';
+      updateCalibrationIdentity(state, { sourceProductId: '', diagnosticDraftId: '' });
       elements.sourceProductId.value = '';
       elements.diagnosticDraftId.value = '';
       invalidatePreparedData();
@@ -592,8 +613,13 @@ export function initObsidianPublishing({
       if (!selection.keepLoadedBatch && state.batch) {
         state.batch = null;
         state.basePlanId = '';
+        updateCalibrationIdentity(state, { sourceProductId: '', diagnosticDraftId: '' });
+        elements.sourceProductId.value = '';
+        elements.diagnosticDraftId.value = '';
         invalidatePreparedData();
         renderPlans();
+        renderSavedDrafts();
+        syncCalibrationControls();
       }
       if (selection.selectedPath) {
         elements.select.value = selection.selectedPath;
@@ -626,10 +652,19 @@ export function initObsidianPublishing({
     syncCalibrationControls();
   });
   elements.sourceProductId.addEventListener('input', () => {
-    state.sourceProductId = elements.sourceProductId.value.trim();
+    updateCalibrationIdentity(state, {
+      sourceProductId: elements.sourceProductId.value,
+      diagnosticDraftId: elements.diagnosticDraftId.value,
+    });
     syncCalibrationControls();
   });
-  elements.diagnosticDraftId.addEventListener('input', syncCalibrationControls);
+  elements.diagnosticDraftId.addEventListener('input', () => {
+    updateCalibrationIdentity(state, {
+      sourceProductId: elements.sourceProductId.value,
+      diagnosticDraftId: elements.diagnosticDraftId.value,
+    });
+    syncCalibrationControls();
+  });
   elements.loadSource.addEventListener('click', async () => {
     state.sourceProductId = elements.sourceProductId.value.trim();
     if (!state.batch || !state.basePlanId) {
@@ -668,6 +703,10 @@ export function initObsidianPublishing({
       ));
       if (latestDraft && !elements.diagnosticDraftId.value) {
         elements.diagnosticDraftId.value = latestDraft.draftProductId;
+        updateCalibrationIdentity(state, {
+          sourceProductId: state.sourceProductId,
+          diagnosticDraftId: latestDraft.draftProductId,
+        });
       }
       syncCalibrationControls();
       text(
@@ -684,6 +723,10 @@ export function initObsidianPublishing({
   });
   elements.diagnoseSellingPoints.addEventListener('click', async () => {
     const draftProductId = elements.diagnosticDraftId.value.trim();
+    updateCalibrationIdentity(state, {
+      sourceProductId: elements.sourceProductId.value,
+      diagnosticDraftId: draftProductId,
+    });
     const readiness = sellingPointCalibrationState(state, draftProductId);
     if (!readiness.ready) {
       text(elements.sellingPointStatus, readiness.message);
