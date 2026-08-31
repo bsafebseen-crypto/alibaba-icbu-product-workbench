@@ -236,9 +236,24 @@ export function createServer(options = {}) {
       if (request.method === 'POST' && url.pathname === '/api/obsidian/source-product') {
         const body = await readJson(request);
         const context = await loadAlibabaProductContext(body.config, { productId: body.productId });
+        const sellingPointCandidates = summarizeSellingPointCandidates(context.schemaXml);
+        const storedBinding = await readSellingPointBinding(rootDir, context);
+        let sellingPointBinding = null;
+        if (storedBinding) {
+          try {
+            sellingPointBinding = {
+              ...storedBinding,
+              ...validateSellingPointBinding(context.schemaXml, storedBinding),
+            };
+          } catch {
+            sellingPointBinding = null;
+          }
+        }
         sendJson(response, 200, {
           ...context,
           analysis: analyzeProductSchema(context.schemaXml),
+          sellingPointCandidates,
+          sellingPointBinding,
         });
         return;
       }

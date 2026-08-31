@@ -4,13 +4,11 @@ import assert from 'node:assert/strict';
 import {
   buildPreviewRequest,
   buildSharedImageAssignments,
-  commonSellingPointCandidate,
   canGenerateCompletePreviews,
   createObsidianPublishingState,
   draftsForBatch,
   formatBatchLoadStatus,
   formatDraftVerification,
-  formatSellingPointDiagnosisError,
   formatPreviewSuccess,
   imageFileKey,
   imageContentKey,
@@ -22,8 +20,8 @@ import {
   prepareReplacementVariant,
   remainingPlans,
   resolveUploadedImages,
-  sellingPointCalibrationState,
-  updateCalibrationIdentity,
+  sourceSellingPointCandidate,
+  updateSourceProductIdentity,
   uniqueAssignmentImages,
 } from '../public/obsidian-publishing.js';
 
@@ -37,9 +35,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     batch: null,
     basePlanId: '',
     sourceProductId: '',
-    diagnosticDraftId: '',
     sourceContext: null,
-    sellingPointDiagnosis: null,
     sellingPointBinding: null,
     sellingPointBindingConfirmed: false,
     allVariants: [],
@@ -102,29 +98,16 @@ test('buildSharedImageAssignments rotates shared images and uniqueAssignmentImag
   assert.equal(uniqueAssignmentImages(assignments).length, 9);
 });
 
-test('commonSellingPointCandidate requires one matching source and draft carrier', () => {
+test('sourceSellingPointCandidate requires one non-empty single-text candidate from the published product', () => {
   const candidate = {
     fieldId: 'textDesc', fieldName: '商品卖点', structureType: 'single-text',
     carrierPaths: [['value']], nonEmpty: true,
   };
-  assert.deepEqual(commonSellingPointCandidate({
-    sourceCandidates: [candidate],
-    draftCandidates: [structuredClone(candidate)],
-  }), {
+  assert.deepEqual(sourceSellingPointCandidate([candidate]), {
     fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
   });
-  assert.throws(() => commonSellingPointCandidate({
-    sourceCandidates: [candidate],
-    draftCandidates: [],
-  }), /无法唯一确认卖点字段/);
-});
-
-test('formatSellingPointDiagnosisError explains that a published product id is not a draft id', () => {
-  assert.equal(
-    formatSellingPointDiagnosisError(new Error('API_SYSTEM_ERROR: Record does not exist.')),
-    '没有找到这个商品草稿。这里必须填写“商品草稿 ID”，不能填写正式商品 ID。请从阿里后台已保存的商品草稿中复制草稿 ID。',
-  );
-  assert.equal(formatSellingPointDiagnosisError(new Error('连接超时')), '连接超时');
+  assert.throws(() => sourceSellingPointCandidate([]), /无法从正式商品唯一确认卖点字段/);
+  assert.throws(() => sourceSellingPointCandidate([{ ...candidate, nonEmpty: false }]), /无法从正式商品唯一确认卖点字段/);
 });
 
 test('complete preview generation requires both uploaded images and a confirmed selling point binding', () => {
@@ -302,45 +285,9 @@ test('draftsForBatch shows only drafts belonging to the loaded Markdown batch', 
   assert.deepEqual(draftsForBatch(drafts, null), []);
 });
 
-test('sellingPointCalibrationState explains every prerequisite before read-only diagnosis', () => {
-  const batch = { source: { relativePath: '2026-08-28/反光裤子3.md' } };
-
-  assert.deepEqual(sellingPointCalibrationState({ batch }, ''), {
-    canAttempt: false,
-    ready: false,
-    message: '请先填写数字格式的已有草稿 ID。',
-  });
-  assert.match(
-    sellingPointCalibrationState({ batch, basePlanId: '' }, '1601936022712').message,
-    /选择已经发布的母商品方案/,
-  );
-  assert.match(
-    sellingPointCalibrationState({ batch, basePlanId: 'plan-1', sourceProductId: '' }, '1601936022712').message,
-    /填写阿里国际站母商品 ID/,
-  );
-  assert.match(
-    sellingPointCalibrationState({
-      batch, basePlanId: 'plan-1', sourceProductId: '1601936000000', sourceContext: null,
-    }, '1601936022712').message,
-    /只读加载母商品 Schema/,
-  );
-  assert.deepEqual(sellingPointCalibrationState({
-    batch,
-    basePlanId: 'plan-1',
-    sourceProductId: '1601936000000',
-    sourceContext: { categoryId: '301504' },
-  }, '1601936022712'), {
-    canAttempt: true,
-    ready: true,
-    message: '准备就绪，可以只读校准卖点字段。',
-  });
-});
-
-test('updateCalibrationIdentity invalidates a stale candidate and preview when either ID changes', () => {
+test('updateSourceProductIdentity invalidates a stale binding and preview when the published product changes', () => {
   const state = createObsidianPublishingState();
   state.sourceProductId = '1601936000000';
-  state.diagnosticDraftId = '1601936022712';
-  state.sellingPointDiagnosis = { draftProductId: '1601936022712' };
   state.sellingPointBinding = {
     fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
   };
@@ -350,12 +297,8 @@ test('updateCalibrationIdentity invalidates a stale candidate and preview when e
   state.taskId = 'task';
   state.draftItems = { 'plan-2': { status: 'preview_ready' } };
 
-  assert.equal(updateCalibrationIdentity(state, {
-    sourceProductId: '1601936000000',
-    diagnosticDraftId: '1601936999999',
-  }), true);
-  assert.equal(state.diagnosticDraftId, '1601936999999');
-  assert.equal(state.sellingPointDiagnosis, null);
+  assert.equal(updateSourceProductIdentity(state, '1601936999999'), true);
+  assert.equal(state.sourceProductId, '1601936999999');
   assert.equal(state.sellingPointBinding, null);
   assert.equal(state.sellingPointBindingConfirmed, false);
   assert.deepEqual(

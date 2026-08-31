@@ -543,6 +543,7 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
     assert.match(page, /id="obsidian-generate-previews"/);
     assert.match(page, /id="obsidian-draft-status"/);
     assert.match(page, /id="obsidian-saved-drafts"/);
+    assert.doesNotMatch(page, /obsidian-diagnostic-draft-id|已有商品草稿 ID/);
 
     const controller = await fetch(`${baseUrl}/obsidian-publishing.js`);
     assert.equal(controller.status, 200);
@@ -564,16 +565,55 @@ test('POST /api/obsidian/source-product loads read-only context and schema analy
     assert.deepEqual(await response.json(), {
       sourceProductId: '1601915922577',
       categoryId: '32905',
+      language: 'en_US',
+      version: 'trade.1.1',
       schemaXml: '<itemSchema />',
       analysis: { warnings: [] },
+      sellingPointCandidates: [],
+      sellingPointBinding: null,
     });
     assert.deepEqual(received, { config: { appKey: 'key' }, input: { productId: '1601915922577' } });
   }, {
     loadAlibabaProductContext: async (config, input) => {
       received = { config, input };
-      return { sourceProductId: input.productId, categoryId: '32905', schemaXml: '<itemSchema />' };
+      return {
+        sourceProductId: input.productId,
+        categoryId: '32905', language: 'en_US', version: 'trade.1.1',
+        schemaXml: '<itemSchema />',
+      };
     },
     analyzeProductSchema: () => ({ warnings: [] }),
+    summarizeSellingPointCandidates: () => [],
+    readSellingPointBinding: async () => null,
+  });
+});
+
+test('POST /api/obsidian/source-product reuses a validated selling-point binding for the published product schema', async () => {
+  const binding = {
+    fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
+    categoryId: '301504', language: 'en_US', version: 'trade.1.1',
+  };
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/obsidian/source-product`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appKey: 'key' }, productId: '1601938039959' }),
+    });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.deepEqual(result.sellingPointBinding, binding);
+    assert.equal(result.sellingPointCandidates.length, 1);
+  }, {
+    loadAlibabaProductContext: async () => ({
+      sourceProductId: '1601938039959', categoryId: '301504', language: 'en_US',
+      version: 'trade.1.1', schemaXml: '<itemSchema />',
+    }),
+    analyzeProductSchema: () => ({ warnings: [] }),
+    summarizeSellingPointCandidates: () => [{
+      fieldId: 'textDesc', fieldName: '商品卖点', structureType: 'single-text',
+      carrierPaths: [['value']], nonEmpty: true,
+    }],
+    readSellingPointBinding: async () => binding,
+    validateSellingPointBinding: () => binding,
   });
 });
 

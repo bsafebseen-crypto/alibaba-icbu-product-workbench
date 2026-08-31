@@ -6,9 +6,7 @@ export function createObsidianPublishingState() {
     batch: null,
     basePlanId: '',
     sourceProductId: '',
-    diagnosticDraftId: '',
     sourceContext: null,
-    sellingPointDiagnosis: null,
     sellingPointBinding: null,
     sellingPointBindingConfirmed: false,
     allVariants: [],
@@ -63,36 +61,18 @@ export function uniqueAssignmentImages(assignments = []) {
     .map((image) => [image.sha256, image])).values()];
 }
 
-export function commonSellingPointCandidate(diagnosis = {}) {
-  const sourceCandidates = Array.isArray(diagnosis.sourceCandidates)
-    ? diagnosis.sourceCandidates
-    : [];
-  const draftCandidates = Array.isArray(diagnosis.draftCandidates)
-    ? diagnosis.draftCandidates
-    : [];
-  const matches = sourceCandidates.flatMap((source) => {
-    if (source.structureType !== 'single-text' || source.carrierPaths?.length !== 1) return [];
-    const path = source.carrierPaths[0];
-    const matchingDrafts = draftCandidates.filter((draft) => (
-      draft.fieldId === source.fieldId
-      && draft.structureType === 'single-text'
-      && JSON.stringify(draft.carrierPaths) === JSON.stringify([path])
-    ));
-    return matchingDrafts.length === 1 ? [{
-      fieldId: source.fieldId,
-      carrierPath: [...path],
-      structureType: 'single-text',
-    }] : [];
-  });
-  if (matches.length !== 1) throw new Error('无法唯一确认卖点字段');
-  return matches[0];
-}
-
-export function formatSellingPointDiagnosisError(error) {
-  const message = String(error?.message || error || '');
-  return /Record does not exist/i.test(message)
-    ? '没有找到这个商品草稿。这里必须填写“商品草稿 ID”，不能填写正式商品 ID。请从阿里后台已保存的商品草稿中复制草稿 ID。'
-    : message;
+export function sourceSellingPointCandidate(candidates = []) {
+  const matches = candidates.filter((candidate) => (
+    candidate?.structureType === 'single-text'
+    && candidate.carrierPaths?.length === 1
+    && candidate.nonEmpty === true
+  ));
+  if (matches.length !== 1) throw new Error('无法从正式商品唯一确认卖点字段');
+  return {
+    fieldId: matches[0].fieldId,
+    carrierPath: [...matches[0].carrierPaths[0]],
+    structureType: 'single-text',
+  };
 }
 
 export function canGenerateCompletePreviews(state, imagesReady) {
@@ -185,37 +165,12 @@ export function draftsForBatch(drafts = [], batch = null) {
   return drafts.filter((draft) => draft?.relativePath === relativePath);
 }
 
-export function sellingPointCalibrationState(state = {}, draftProductId = '') {
-  if (!/^\d+$/.test(String(draftProductId).trim())) {
-    return { canAttempt: false, ready: false, message: '请先填写数字格式的已有草稿 ID。' };
-  }
-  if (!state.batch) {
-    return { canAttempt: true, ready: false, message: '草稿 ID 已填写；请先载入一个 Obsidian 批次。' };
-  }
-  if (!state.basePlanId) {
-    return { canAttempt: true, ready: false, message: '草稿 ID 已填写；请先选择已经发布的母商品方案。' };
-  }
-  if (!/^\d+$/.test(String(state.sourceProductId || '').trim())) {
-    return { canAttempt: true, ready: false, message: '母商品方案已选择；请填写阿里国际站母商品 ID。' };
-  }
-  if (!state.sourceContext) {
-    return { canAttempt: true, ready: false, message: '母商品与草稿 ID 已填写；请先点击“只读加载母商品 Schema”。' };
-  }
-  return { canAttempt: true, ready: true, message: '准备就绪，可以只读校准卖点字段。' };
-}
-
-export function updateCalibrationIdentity(state, {
-  sourceProductId = state.sourceProductId,
-  diagnosticDraftId = state.diagnosticDraftId,
-} = {}) {
+export function updateSourceProductIdentity(state, sourceProductId = state.sourceProductId) {
   const nextSourceProductId = String(sourceProductId || '').trim();
-  const nextDiagnosticDraftId = String(diagnosticDraftId || '').trim();
-  const changed = nextSourceProductId !== state.sourceProductId
-    || nextDiagnosticDraftId !== state.diagnosticDraftId;
+  const changed = nextSourceProductId !== state.sourceProductId;
   state.sourceProductId = nextSourceProductId;
-  state.diagnosticDraftId = nextDiagnosticDraftId;
   if (changed) {
-    state.sellingPointDiagnosis = null;
+    state.sourceContext = null;
     state.sellingPointBinding = null;
     state.sellingPointBindingConfirmed = false;
     invalidatePreviewState(state);
@@ -303,8 +258,6 @@ export function initObsidianPublishing({
     remaining: documentRef.getElementById('obsidian-remaining-summary'),
     loadSource: documentRef.getElementById('obsidian-load-source'),
     sourceStatus: documentRef.getElementById('obsidian-source-status'),
-    diagnosticDraftId: documentRef.getElementById('obsidian-diagnostic-draft-id'),
-    diagnoseSellingPoints: documentRef.getElementById('obsidian-diagnose-selling-points'),
     confirmSellingPoint: documentRef.getElementById('obsidian-confirm-selling-point'),
     sellingPointStatus: documentRef.getElementById('obsidian-selling-point-status'),
     mainImageInputs: Array.from({ length: 4 }, (_, index) => (
@@ -338,7 +291,6 @@ export function initObsidianPublishing({
 
   function invalidatePreparedData() {
     state.sourceContext = null;
-    state.sellingPointDiagnosis = null;
     state.sellingPointBinding = null;
     state.sellingPointBindingConfirmed = false;
     state.allVariants = [];
@@ -352,7 +304,6 @@ export function initObsidianPublishing({
     invalidatePreviewState(state);
     elements.uploadImages.disabled = true;
     elements.generatePreviews.disabled = true;
-    elements.diagnoseSellingPoints.disabled = true;
     elements.confirmSellingPoint.disabled = true;
     elements.variants.innerHTML = '<p>载入母商品 Schema 后显示剩余四套方案。</p>';
     setPreviewStatus('尚未准备图片。');
@@ -500,22 +451,12 @@ export function initObsidianPublishing({
     }
   }
 
-  function syncCalibrationControls({ updateMessage = true } = {}) {
-    const readiness = sellingPointCalibrationState(
-      state,
-      elements.diagnosticDraftId.value,
-    );
-    elements.diagnoseSellingPoints.disabled = !readiness.canAttempt;
-    elements.diagnoseSellingPoints.title = readiness.ready ? '' : readiness.message;
-    elements.confirmSellingPoint.disabled = !state.sellingPointDiagnosis
-      || !state.sellingPointBinding;
+  function syncCalibrationControls() {
+    elements.confirmSellingPoint.disabled = !state.sellingPointBinding
+      || state.sellingPointBindingConfirmed;
     elements.confirmSellingPoint.title = state.sellingPointBinding
-      ? ''
-      : '先完成只读校准，确认按钮才会启用。';
-    if (updateMessage && !state.sellingPointDiagnosis) {
-      text(elements.sellingPointStatus, readiness.message);
-    }
-    return readiness;
+      ? state.sellingPointBindingConfirmed ? '当前类目版本已确认并自动复用。' : ''
+      : '先只读加载正式母商品，工作台会从其 Schema 识别卖点字段。';
   }
 
   function invalidateSharedImagePreview(message = '共享图片已经变化，请重新生成完整预览。') {
@@ -541,7 +482,7 @@ export function initObsidianPublishing({
     const imagesReady = sharedImagesReady();
     elements.generatePreviews.disabled = !canGenerateCompletePreviews(state, imagesReady);
     if (imagesReady && !state.sellingPointBindingConfirmed) {
-      elements.generatePreviews.title = '先用一个真实的商品草稿完成卖点字段校准，并点击“确认这个卖点字段”。';
+      elements.generatePreviews.title = '先从正式母商品确认卖点字段。';
     } else {
       elements.generatePreviews.title = '';
     }
@@ -616,9 +557,8 @@ export function initObsidianPublishing({
         body: JSON.stringify({ relativePath: elements.select.value }),
       });
       state.basePlanId = '';
-      updateCalibrationIdentity(state, { sourceProductId: '', diagnosticDraftId: '' });
+      updateSourceProductIdentity(state, '');
       elements.sourceProductId.value = '';
-      elements.diagnosticDraftId.value = '';
       invalidatePreparedData();
       renderPlans();
       renderSavedDrafts();
@@ -646,9 +586,8 @@ export function initObsidianPublishing({
       if (!selection.keepLoadedBatch && state.batch) {
         state.batch = null;
         state.basePlanId = '';
-        updateCalibrationIdentity(state, { sourceProductId: '', diagnosticDraftId: '' });
+        updateSourceProductIdentity(state, '');
         elements.sourceProductId.value = '';
-        elements.diagnosticDraftId.value = '';
         invalidatePreparedData();
         renderPlans();
         renderSavedDrafts();
@@ -685,21 +624,11 @@ export function initObsidianPublishing({
     syncCalibrationControls();
   });
   elements.sourceProductId.addEventListener('input', () => {
-    updateCalibrationIdentity(state, {
-      sourceProductId: elements.sourceProductId.value,
-      diagnosticDraftId: elements.diagnosticDraftId.value,
-    });
-    syncCalibrationControls();
-  });
-  elements.diagnosticDraftId.addEventListener('input', () => {
-    updateCalibrationIdentity(state, {
-      sourceProductId: elements.sourceProductId.value,
-      diagnosticDraftId: elements.diagnosticDraftId.value,
-    });
+    updateSourceProductIdentity(state, elements.sourceProductId.value);
     syncCalibrationControls();
   });
   elements.loadSource.addEventListener('click', async () => {
-    state.sourceProductId = elements.sourceProductId.value.trim();
+    updateSourceProductIdentity(state, elements.sourceProductId.value);
     if (!state.batch || !state.basePlanId) {
       text(elements.sourceStatus, '请先载入批次并选择母商品方案。');
       return;
@@ -731,17 +660,30 @@ export function initObsidianPublishing({
       state.uploads = {};
       invalidatePreviewState(state);
       renderVariants();
-      const latestDraft = state.savedDrafts.find((draft) => (
-        draft.relativePath === state.batch.source.relativePath
-      ));
-      if (latestDraft && !elements.diagnosticDraftId.value) {
-        elements.diagnosticDraftId.value = latestDraft.draftProductId;
-        updateCalibrationIdentity(state, {
-          sourceProductId: state.sourceProductId,
-          diagnosticDraftId: latestDraft.draftProductId,
-        });
+      if (state.sourceContext.sellingPointBinding) {
+        applySellingPointBinding(state, state.sourceContext.sellingPointBinding);
+        state.sellingPointBindingConfirmed = true;
+        text(
+          elements.sellingPointStatus,
+          `已自动复用卖点字段 ${state.sellingPointBinding.fieldId}；无需草稿 ID。`,
+        );
+      } else {
+        try {
+          const candidate = sourceSellingPointCandidate(state.sourceContext.sellingPointCandidates);
+          applySellingPointBinding(state, candidate);
+          state.sellingPointBindingConfirmed = false;
+          text(
+            elements.sellingPointStatus,
+            `已从正式商品识别候选字段 ${candidate.fieldId}；请确认一次，之后同类目版本自动复用。`,
+          );
+        } catch (error) {
+          applySellingPointBinding(state, null);
+          state.sellingPointBindingConfirmed = false;
+          text(elements.sellingPointStatus, `${error.message}，为避免写错字段，暂不能生成预览。`);
+        }
       }
       syncCalibrationControls();
+      syncPreviewGenerationControl();
       text(
         elements.sourceStatus,
         `已读取类目 ${state.sourceContext.categoryId} · ${state.sourceContext.sourceProductType} · ${state.sourceContext.language}；已完成 ${state.completedDrafts.length} 个，待办 ${state.variants.length} 个；未修改商品。`,
@@ -752,50 +694,6 @@ export function initObsidianPublishing({
       text(elements.sourceStatus, error.message);
     } finally {
       elements.loadSource.disabled = false;
-    }
-  });
-  elements.diagnoseSellingPoints.addEventListener('click', async () => {
-    const draftProductId = elements.diagnosticDraftId.value.trim();
-    updateCalibrationIdentity(state, {
-      sourceProductId: elements.sourceProductId.value,
-      diagnosticDraftId: draftProductId,
-    });
-    const readiness = sellingPointCalibrationState(state, draftProductId);
-    if (!readiness.ready) {
-      text(elements.sellingPointStatus, readiness.message);
-      return;
-    }
-    elements.diagnoseSellingPoints.disabled = true;
-    elements.confirmSellingPoint.disabled = true;
-    text(elements.sellingPointStatus, '正在只读比较母商品与草稿的卖点字段…');
-    try {
-      state.sellingPointDiagnosis = await requestJson('/api/obsidian/selling-points/diagnose', {
-        method: 'POST',
-        body: JSON.stringify({
-          config: getAlibabaConfig(),
-          sourceProductId: state.sourceProductId,
-          draftProductId,
-        }),
-      });
-      const candidate = commonSellingPointCandidate(state.sellingPointDiagnosis);
-      state.sellingPointBindingConfirmed = false;
-      if (applySellingPointBinding(state, candidate)) {
-        invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
-      }
-      elements.confirmSellingPoint.disabled = false;
-      text(
-        elements.sellingPointStatus,
-        `候选字段 ${candidate.fieldId} · ${candidate.structureType}；确认前仍禁止生成草稿。`,
-      );
-    } catch (error) {
-      state.sellingPointDiagnosis = null;
-      if (applySellingPointBinding(state, null)) {
-        invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
-      }
-      state.sellingPointBindingConfirmed = false;
-      text(elements.sellingPointStatus, formatSellingPointDiagnosisError(error));
-    } finally {
-      syncCalibrationControls({ updateMessage: false });
     }
   });
   elements.confirmSellingPoint.addEventListener('click', async () => {
@@ -931,7 +829,7 @@ export function initObsidianPublishing({
       setPreviewStatus(
         state.sellingPointBindingConfirmed
           ? `${unique.length} 张实际使用图片已在图片银行就绪；可以生成完整预览，尚未创建商品。`
-          : `${unique.length} 张实际使用图片已在图片银行就绪；还需用真实商品草稿校准并确认卖点字段。`,
+          : `${unique.length} 张实际使用图片已在图片银行就绪；还需确认从正式母商品识别出的卖点字段。`,
         'success',
       );
       for (const variant of state.variants) {
@@ -946,7 +844,7 @@ export function initObsidianPublishing({
   });
   elements.generatePreviews.addEventListener('click', async () => {
     if (!canGenerateCompletePreviews(state, sharedImagesReady())) {
-      setPreviewStatus('暂不能生成：请先让图片银行就绪，并用真实商品草稿校准、确认卖点字段。', 'error');
+      setPreviewStatus('暂不能生成：请先让图片银行就绪，并确认从正式母商品识别出的卖点字段。', 'error');
       syncPreviewGenerationControl();
       return;
     }
