@@ -10,6 +10,7 @@ export function createObsidianPublishingState() {
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
+    sellingPointBindingConfirmed: false,
     allVariants: [],
     variants: [],
     completedDrafts: [],
@@ -85,6 +86,17 @@ export function commonSellingPointCandidate(diagnosis = {}) {
   });
   if (matches.length !== 1) throw new Error('无法唯一确认卖点字段');
   return matches[0];
+}
+
+export function formatSellingPointDiagnosisError(error) {
+  const message = String(error?.message || error || '');
+  return /Record does not exist/i.test(message)
+    ? '没有找到这个商品草稿。这里必须填写“商品草稿 ID”，不能填写正式商品 ID。请从阿里后台已保存的商品草稿中复制草稿 ID。'
+    : message;
+}
+
+export function canGenerateCompletePreviews(state, imagesReady) {
+  return Boolean(imagesReady && state?.sellingPointBinding && state?.sellingPointBindingConfirmed);
 }
 
 export function resolveUploadedImages(variants, filesByPlan, uploads) {
@@ -205,6 +217,7 @@ export function updateCalibrationIdentity(state, {
   if (changed) {
     state.sellingPointDiagnosis = null;
     state.sellingPointBinding = null;
+    state.sellingPointBindingConfirmed = false;
     invalidatePreviewState(state);
   }
   return changed;
@@ -327,6 +340,7 @@ export function initObsidianPublishing({
     state.sourceContext = null;
     state.sellingPointDiagnosis = null;
     state.sellingPointBinding = null;
+    state.sellingPointBindingConfirmed = false;
     state.allVariants = [];
     state.variants = [];
     state.completedDrafts = [];
@@ -512,6 +526,25 @@ export function initObsidianPublishing({
       button.textContent = '请重新生成完整预览';
     });
     text(elements.draftStatus, message);
+  }
+
+  function sharedImagesReady() {
+    try {
+      resolveSharedUploadedImages(buildSharedImageAssignments(state), state.uploads);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function syncPreviewGenerationControl() {
+    const imagesReady = sharedImagesReady();
+    elements.generatePreviews.disabled = !canGenerateCompletePreviews(state, imagesReady);
+    if (imagesReady && !state.sellingPointBindingConfirmed) {
+      elements.generatePreviews.title = '先用一个真实的商品草稿完成卖点字段校准，并点击“确认这个卖点字段”。';
+    } else {
+      elements.generatePreviews.title = '';
+    }
   }
 
   function renderSharedAssignments() {
@@ -745,6 +778,7 @@ export function initObsidianPublishing({
         }),
       });
       const candidate = commonSellingPointCandidate(state.sellingPointDiagnosis);
+      state.sellingPointBindingConfirmed = false;
       if (applySellingPointBinding(state, candidate)) {
         invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
       }
@@ -758,7 +792,8 @@ export function initObsidianPublishing({
       if (applySellingPointBinding(state, null)) {
         invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
       }
-      text(elements.sellingPointStatus, error.message);
+      state.sellingPointBindingConfirmed = false;
+      text(elements.sellingPointStatus, formatSellingPointDiagnosisError(error));
     } finally {
       syncCalibrationControls({ updateMessage: false });
     }
@@ -782,6 +817,8 @@ export function initObsidianPublishing({
       if (applySellingPointBinding(state, result.binding)) {
         invalidateSharedImagePreview('卖点字段绑定已经变化，请重新生成完整预览。');
       }
+      state.sellingPointBindingConfirmed = true;
+      syncPreviewGenerationControl();
       text(
         elements.sellingPointStatus,
         `卖点字段已确认：${result.binding.fieldId} · ${result.binding.structureType}`,
@@ -890,8 +927,13 @@ export function initObsidianPublishing({
         state.uploads[image.sha256] = upload;
       }
       resolveSharedUploadedImages(assignments, state.uploads);
-      elements.generatePreviews.disabled = false;
-      setPreviewStatus(`${unique.length} 张实际使用图片已在图片银行就绪；尚未创建商品。`, 'success');
+      syncPreviewGenerationControl();
+      setPreviewStatus(
+        state.sellingPointBindingConfirmed
+          ? `${unique.length} 张实际使用图片已在图片银行就绪；可以生成完整预览，尚未创建商品。`
+          : `${unique.length} 张实际使用图片已在图片银行就绪；还需用真实商品草稿校准并确认卖点字段。`,
+        'success',
+      );
       for (const variant of state.variants) {
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(variant.id)}"]`);
         text(card?.querySelector('.obsidian-variant-status'), '图片银行已就绪');
@@ -903,6 +945,11 @@ export function initObsidianPublishing({
     }
   });
   elements.generatePreviews.addEventListener('click', async () => {
+    if (!canGenerateCompletePreviews(state, sharedImagesReady())) {
+      setPreviewStatus('暂不能生成：请先让图片银行就绪，并用真实商品草稿校准、确认卖点字段。', 'error');
+      syncPreviewGenerationControl();
+      return;
+    }
     elements.generatePreviews.disabled = true;
     setPreviewStatus('正在生成四份完整本地 Schema；不会提交商品。');
     try {
@@ -932,7 +979,7 @@ export function initObsidianPublishing({
       text(elements.draftStatus, '草稿测试已就绪。请逐个核对方案卡，然后单独点击并确认。');
     } catch (error) {
       setPreviewStatus(error.message, 'error');
-      elements.generatePreviews.disabled = false;
+      syncPreviewGenerationControl();
     }
   });
   elements.variants.addEventListener('click', async (event) => {

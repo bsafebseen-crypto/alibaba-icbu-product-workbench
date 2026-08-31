@@ -5,10 +5,12 @@ import {
   buildPreviewRequest,
   buildSharedImageAssignments,
   commonSellingPointCandidate,
+  canGenerateCompletePreviews,
   createObsidianPublishingState,
   draftsForBatch,
   formatBatchLoadStatus,
   formatDraftVerification,
+  formatSellingPointDiagnosisError,
   formatPreviewSuccess,
   imageFileKey,
   imageContentKey,
@@ -39,6 +41,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     sourceContext: null,
     sellingPointDiagnosis: null,
     sellingPointBinding: null,
+    sellingPointBindingConfirmed: false,
     allVariants: [],
     variants: [],
     completedDrafts: [],
@@ -114,6 +117,26 @@ test('commonSellingPointCandidate requires one matching source and draft carrier
     sourceCandidates: [candidate],
     draftCandidates: [],
   }), /无法唯一确认卖点字段/);
+});
+
+test('formatSellingPointDiagnosisError explains that a published product id is not a draft id', () => {
+  assert.equal(
+    formatSellingPointDiagnosisError(new Error('API_SYSTEM_ERROR: Record does not exist.')),
+    '没有找到这个商品草稿。这里必须填写“商品草稿 ID”，不能填写正式商品 ID。请从阿里后台已保存的商品草稿中复制草稿 ID。',
+  );
+  assert.equal(formatSellingPointDiagnosisError(new Error('连接超时')), '连接超时');
+});
+
+test('complete preview generation requires both uploaded images and a confirmed selling point binding', () => {
+  const state = createObsidianPublishingState();
+  state.sellingPointBinding = {
+    fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
+  };
+
+  assert.equal(canGenerateCompletePreviews(state, true), false);
+  state.sellingPointBindingConfirmed = true;
+  assert.equal(canGenerateCompletePreviews(state, false), false);
+  assert.equal(canGenerateCompletePreviews(state, true), true);
 });
 
 test('remainingPlans excludes any selected base plan and preserves source order', () => {
@@ -321,6 +344,7 @@ test('updateCalibrationIdentity invalidates a stale candidate and preview when e
   state.sellingPointBinding = {
     fieldId: 'textDesc', carrierPath: ['value'], structureType: 'single-text',
   };
+  state.sellingPointBindingConfirmed = true;
   state.previews = [{ planId: 'plan-2' }];
   state.sessionId = 'session';
   state.taskId = 'task';
@@ -333,6 +357,7 @@ test('updateCalibrationIdentity invalidates a stale candidate and preview when e
   assert.equal(state.diagnosticDraftId, '1601936999999');
   assert.equal(state.sellingPointDiagnosis, null);
   assert.equal(state.sellingPointBinding, null);
+  assert.equal(state.sellingPointBindingConfirmed, false);
   assert.deepEqual(
     { previews: state.previews, sessionId: state.sessionId, taskId: state.taskId, draftItems: state.draftItems },
     { previews: [], sessionId: '', taskId: '', draftItems: {} },

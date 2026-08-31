@@ -315,10 +315,10 @@
           <fieldset class="obsidian-plan-list" id="obsidian-plan-list"><legend>选择与该商品对应的方案</legend></fieldset>
           <p class="obsidian-remaining" id="obsidian-remaining-summary">选择母商品方案后，这里会显示剩余 4 个类似品。</p>
           <div class="obsidian-selling-point-calibration">
-            <label><span>用于校准的已有草稿 ID</span><input id="obsidian-diagnostic-draft-id" type="text" inputmode="numeric" autocomplete="off" placeholder="例如 1601933441594"></label>
+            <label><span>用于校准的已有商品草稿 ID（不能填正式商品 ID）</span><input id="obsidian-diagnostic-draft-id" type="text" inputmode="numeric" autocomplete="off" placeholder="必须是阿里后台已保存的商品草稿 ID"></label>
             <button class="button quiet" id="obsidian-diagnose-selling-points" type="button" disabled>校准卖点字段（只读）</button>
             <button class="button primary" id="obsidian-confirm-selling-point" type="button" disabled>确认这个卖点字段</button>
-            <p id="obsidian-selling-point-status" role="status">尚未校准；校准只读取字段结构，不修改商品。</p>
+            <p id="obsidian-selling-point-status" role="status">尚未校准；这里需要商品草稿 ID，不能使用上方的正式母商品 ID。校准只读取字段结构，不修改商品。</p>
           </div>
         </section>
 
@@ -355,11 +355,12 @@
             <button class="button quiet" id="obsidian-upload-images" type="button" disabled>确认上传所选图片</button>
             <button class="button primary" id="obsidian-generate-previews" type="button" disabled>生成四份完整预览</button>
           </div>
+          <p>操作顺序：图片银行就绪 → 校准并确认卖点字段 → 生成完整预览 → 在每张方案卡上点击“确认并创建此商品草稿”。</p>
         </section>
 
         <section class="console-panel obsidian-panel">
           <div class="panel-band red"><strong>4. 商品草稿与只读核对</strong><span>创建需确认 · 核对不写入</span></div>
-          <p class="obsidian-draft-status" id="obsidian-draft-status" role="status">完整预览通过后，四张方案卡会分别出现草稿按钮。正式发布仍然锁定。</p>
+          <p class="obsidian-draft-status" id="obsidian-draft-status" role="status">完整预览通过后，每张方案卡上的“确认并创建此商品草稿”会启用；点击并确认后写入阿里国际站草稿箱。工作台不会正式发布商品。</p>
           <div class="obsidian-saved-drafts" id="obsidian-saved-drafts"><p>正在读取本机草稿记录…</p></div>
         </section>
       </section>
