@@ -20,6 +20,7 @@ import {
   prepareReplacementVariant,
   remainingPlans,
   resolveUploadedImages,
+  selectMainImagesByPlanNumber,
   sourceSellingPointCandidate,
   updateSourceProductIdentity,
   uniqueAssignmentImages,
@@ -28,6 +29,30 @@ import {
 function batch() {
   return { plans: Array.from({ length: 5 }, (_, index) => ({ id: `plan-${index + 1}` })) };
 }
+
+test('bulk main-image selection maps shuffled numeric filenames to the remaining plan ids', () => {
+  const files = ['5.jpg', '2.png', '1.webp', '4.jpeg', '3.jpg'].map((name) => ({ name }));
+
+  assert.deepEqual(
+    selectMainImagesByPlanNumber(files, ['plan-1', 'plan-2', 'plan-4', 'plan-5']),
+    [files[2], files[1], files[3], files[0]],
+  );
+});
+
+test('bulk main-image selection rejects missing, duplicate, and unrecognized plan numbers', () => {
+  assert.throws(
+    () => selectMainImagesByPlanNumber(['1.jpg', '2.jpg', '3.jpg', '4.jpg'].map((name) => ({ name })), ['plan-1', 'plan-2', 'plan-3', 'plan-4']),
+    /必须一次选择命名为 1 到 5 的五张主图/,
+  );
+  assert.throws(
+    () => selectMainImagesByPlanNumber(['1.jpg', '1.png', '2.jpg', '3.jpg', '4.jpg'].map((name) => ({ name })), ['plan-1', 'plan-2', 'plan-3', 'plan-4']),
+    /主图编号 1 重复/,
+  );
+  assert.throws(
+    () => selectMainImagesByPlanNumber(['1.jpg', '2.jpg', '3.jpg', '4.jpg', 'cover.jpg'].map((name) => ({ name })), ['plan-1', 'plan-2', 'plan-3', 'plan-4']),
+    /无法识别主图文件名 cover.jpg/,
+  );
+});
 
 test('createObsidianPublishingState starts without persisted product data', () => {
   assert.deepEqual(createObsidianPublishingState(), {

@@ -461,15 +461,14 @@ body::before { display: none; }
 .locked-panel > p { margin: 0; padding: 18px; color: var(--muted); font-size: 10px; }
 .obsidian-selling-point-calibration, .obsidian-shared-images { display: grid; gap: 12px; margin: 0 18px 18px; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfe; }
 .obsidian-selling-point-calibration { grid-template-columns: minmax(240px, 1fr) auto auto; align-items: end; }
-.obsidian-selling-point-calibration label, .obsidian-main-grid label, .obsidian-fixed-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
+.obsidian-selling-point-calibration label, .obsidian-fixed-grid label { display: grid; gap: 6px; color: var(--muted); font-size: 9px; font-weight: 700; }
 .obsidian-selling-point-calibration input, .obsidian-fixed-grid input { min-height: 36px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: white; }
 .obsidian-selling-point-calibration p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 9px; }
 .obsidian-shared-block { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 .obsidian-shared-block > strong { font-size: 10px; }
 .obsidian-shared-block > span, .obsidian-fixed-image-status { color: var(--muted); font-size: 8px; }
-.obsidian-main-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.obsidian-main-grid label, .obsidian-marketing-picker { min-width: 0; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 5px; background: white; }
-.obsidian-main-grid input, .obsidian-marketing-picker input { width: 100%; font-size: 8px; }
+.obsidian-main-picker, .obsidian-marketing-picker { display: grid; gap: 6px; min-width: 0; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 5px; background: white; color: var(--muted); font-size: 9px; font-weight: 700; }
+.obsidian-main-picker input, .obsidian-marketing-picker input { width: 100%; font-size: 8px; }
 .obsidian-fixed-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; align-items: end; gap: 8px; }
 .obsidian-fixed-image-status { margin: 0; }
 .obsidian-assignment-summary { display: grid; gap: 6px; }

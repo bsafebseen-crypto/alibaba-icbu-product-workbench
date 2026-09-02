@@ -540,6 +540,8 @@ test('GET / exposes the Obsidian publishing module and its browser controller', 
     assert.match(page, /id="obsidian-plan-list"/);
     assert.match(page, /id="obsidian-load-source"/);
     assert.match(page, /id="obsidian-variant-list"/);
+    assert.match(page, /id="obsidian-main-images"[^>]*multiple/);
+    assert.doesNotMatch(page, /id="obsidian-main-image-[1-4]"/);
     assert.match(page, /id="obsidian-upload-images"/);
     assert.match(page, /id="obsidian-generate-previews"/);
     assert.match(page, /id="obsidian-draft-status"/);

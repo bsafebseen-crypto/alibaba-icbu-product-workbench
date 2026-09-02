@@ -119,6 +119,25 @@ export function remainingPlans(batch, basePlanId) {
   return batch.plans.filter((plan) => plan.id !== basePlanId);
 }
 
+export function selectMainImagesByPlanNumber(files = [], planIds = []) {
+  if (files.length !== 5) throw new Error('必须一次选择命名为 1 到 5 的五张主图');
+  const filesByNumber = new Map();
+  for (const file of files) {
+    const match = String(file?.name || '').match(/^([1-5])\.(?:jpe?g|png|webp)$/i);
+    if (!match) throw new Error(`无法识别主图文件名 ${file?.name || ''}；请使用 1.jpg 到 5.jpg`);
+    const planNumber = match[1];
+    if (filesByNumber.has(planNumber)) throw new Error(`主图编号 ${planNumber} 重复`);
+    filesByNumber.set(planNumber, file);
+  }
+  if (planIds.length !== 4) throw new Error('请先选择母商品方案');
+  return planIds.map((planId) => {
+    const match = String(planId).match(/^plan-([1-5])$/);
+    const file = match ? filesByNumber.get(match[1]) : null;
+    if (!file) throw new Error(`没有找到 ${planId} 对应的主图`);
+    return file;
+  });
+}
+
 function bindingIdentity(binding) {
   if (!binding) return '';
   return JSON.stringify({
@@ -260,9 +279,7 @@ export function initObsidianPublishing({
     sourceStatus: documentRef.getElementById('obsidian-source-status'),
     confirmSellingPoint: documentRef.getElementById('obsidian-confirm-selling-point'),
     sellingPointStatus: documentRef.getElementById('obsidian-selling-point-status'),
-    mainImageInputs: Array.from({ length: 4 }, (_, index) => (
-      documentRef.getElementById(`obsidian-main-image-${index + 1}`)
-    )),
+    mainImages: documentRef.getElementById('obsidian-main-images'),
     marketingImages: documentRef.getElementById('obsidian-marketing-images'),
     fixedImagePaths: [
       documentRef.getElementById('obsidian-fixed-image-1'),
@@ -302,6 +319,7 @@ export function initObsidianPublishing({
     state.filesByPlan = {};
     state.uploads = {};
     invalidatePreviewState(state);
+    elements.mainImages.value = '';
     elements.uploadImages.disabled = true;
     elements.generatePreviews.disabled = true;
     elements.confirmSellingPoint.disabled = true;
@@ -726,13 +744,22 @@ export function initObsidianPublishing({
       elements.confirmSellingPoint.disabled = false;
     }
   });
-  elements.mainImageInputs.forEach((input, index) => {
-    input.addEventListener('change', async () => {
-      const file = input.files?.[0];
-      state.mainImages[index] = file ? await describeBrowserFile(file) : null;
+  elements.mainImages.addEventListener('change', async () => {
+    try {
+      const variants = remainingPlans(state.batch, state.basePlanId);
+      const selected = selectMainImagesByPlanNumber(
+        [...(elements.mainImages.files || [])],
+        variants.map((variant) => variant.id),
+      );
+      state.mainImages = await Promise.all(selected.map(describeBrowserFile));
       invalidateSharedImagePreview();
       renderSharedAssignments();
-    });
+    } catch (error) {
+      state.mainImages = [null, null, null, null];
+      invalidateSharedImagePreview();
+      renderSharedAssignments();
+      setPreviewStatus(error.message, 'error');
+    }
   });
 
   elements.marketingImages.addEventListener('change', async () => {
