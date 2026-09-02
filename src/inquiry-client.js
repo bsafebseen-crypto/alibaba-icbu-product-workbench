@@ -31,7 +31,8 @@ function id(value, name) {
 
 function optionalTimestamp(value) {
   if (value === undefined || value === null || value === '') return undefined;
-  const normalized = String(value).trim();
+  if (typeof value !== 'string') throw new Error('时间戳必须是数字字符串');
+  const normalized = value.trim();
   if (!/^\d+$/.test(normalized)) throw new Error('时间戳必须是数字字符串');
   return normalized;
 }
@@ -78,14 +79,16 @@ async function callReadMethod(config, method, apiParams, fetchImpl, timestamp) {
     throw inquiryError('http_error');
   }
   const body = await response.json().catch(() => ({}));
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw inquiryError('malformed_response', '阿里询盘接口返回格式无效');
+  }
   if (!response.ok || body.error_response) throw classifyInquiryError(body.error_response, response.status);
   return body;
 }
 
 function resultFor(body, method) {
   const wrapper = body[method.replaceAll('.', '_') + '_response'];
-  const fallback = Object.entries(body).find(([key]) => key.endsWith('_response'))?.[1];
-  const response = wrapper || fallback;
+  const response = wrapper;
   if (!response || !response.result || !Array.isArray(response.result[method === METHODS.conversations ? 'conversation_list' : 'message_list'])) {
     throw inquiryError('malformed_response', '阿里询盘接口返回格式无效');
   }

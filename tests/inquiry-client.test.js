@@ -5,6 +5,7 @@ import {
   queryConversations,
   queryMessages,
 } from '../src/inquiry-client.js';
+import { signAlibabaParams } from '../src/alibaba-client.js';
 
 const config = {
   inquiryGatewayUrl: 'https://eco.example.com/router/rest',
@@ -30,6 +31,10 @@ test('queryConversations calls only the conversation read method without session
   assert.equal(request.body.method, 'alibaba.interaction.im.conversation.list.query');
   assert.equal('session' in request.body, false);
   assert.equal(request.body.seller_account_id, 'seller-01');
+  assert.equal(request.body.sign, signAlibabaParams(
+    Object.fromEntries(Object.entries(request.body).filter(([key]) => key !== 'sign')),
+    config.appSecret,
+  ));
   assert.equal(result.items[0].conversationId, 'conv-1');
   assert.equal(result.hasMore, true);
   assert.equal(result.requestId, 'req-1');
@@ -67,5 +72,27 @@ test('validates IDs, counts, timestamps and forward', async () => {
 test('maps malformed responses to a stable error code', async () => {
   await assert.rejects(() => queryMessages(config, { conversationId: 'c', selfAccountId: 's' }, async () => ({
     ok: true, async json() { return {}; },
+  })), (error) => error.code === 'malformed_response');
+});
+
+test('maps null and undefined JSON bodies to malformed_response', async () => {
+  for (const value of [null, undefined]) {
+    await assert.rejects(() => queryMessages(config, { conversationId: 'c', selfAccountId: 's' }, async () => ({
+      ok: true, async json() { return value; },
+    })), (error) => error.code === 'malformed_response');
+  }
+});
+
+test('rejects numeric pagination timestamps', async () => {
+  await assert.rejects(() => queryConversations(config, { sellerAccountId: 'seller', limitTimestamp: 123 }, async () => {
+    throw new Error('fetch should not run');
+  }), /时间戳/);
+});
+
+test('rejects a response wrapper belonging to another API', async () => {
+  await assert.rejects(() => queryMessages(config, { conversationId: 'c', selfAccountId: 's' }, async () => ({
+    ok: true, async json() { return {
+      other_api_response: { result: { message_list: [] } },
+    }; },
   })), (error) => error.code === 'malformed_response');
 });
