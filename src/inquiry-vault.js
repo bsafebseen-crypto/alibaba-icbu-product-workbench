@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const VERSION = 1;
@@ -76,10 +76,86 @@ async function readJson(filePath) {
 }
 
 async function writeAtomic(filePath, value) {
-  await mkdir(path.dirname(filePath), { recursive: true });
   const temporaryPath = `${filePath}.${crypto.randomUUID()}.tmp`;
-  await writeFile(temporaryPath, JSON.stringify(value), { encoding: 'utf8', flag: 'wx' });
-  await rename(temporaryPath, filePath);
+  try {
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(temporaryPath, JSON.stringify(value), { encoding: 'utf8', flag: 'wx' });
+    await rename(temporaryPath, filePath);
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    throw error;
+  }
+}
+
+function rotationDirectory(vaultDir) {
+  return path.join(vaultDir, '.rotation');
+}
+
+async function fileExists(filePath) {
+  try {
+    await readFile(filePath);
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
+async function copyCanonicalVault(sourceDir, destinationDir, { reset = true } = {}) {
+  if (reset) await rm(destinationDir, { recursive: true, force: true });
+  await mkdir(destinationDir, { recursive: true });
+  await copyFile(path.join(sourceDir, 'vault.json'), path.join(destinationDir, 'vault.json'));
+  for (const bucket of BUCKETS) {
+    const sourceBucket = path.join(sourceDir, bucket);
+    const entries = await recordFiles(sourceBucket);
+    if (!entries.length) continue;
+    const destinationBucket = path.join(destinationDir, bucket);
+    await mkdir(destinationBucket, { recursive: true });
+    await Promise.all(entries.map((entry) => copyFile(
+      path.join(sourceBucket, entry.name),
+      path.join(destinationBucket, entry.name),
+    )));
+  }
+}
+
+async function clearCanonicalVault(vaultDir) {
+  await rm(path.join(vaultDir, 'vault.json'), { force: true });
+  await Promise.all([...BUCKETS].map((bucket) => rm(path.join(vaultDir, bucket), {
+    recursive: true,
+    force: true,
+  })));
+}
+
+async function replaceCanonicalVault(vaultDir, sourceDir) {
+  await clearCanonicalVault(vaultDir);
+  await copyCanonicalVault(sourceDir, vaultDir, { reset: false });
+}
+
+async function recoverRotation(vaultDir) {
+  const rotationDir = rotationDirectory(vaultDir);
+  const journalPath = path.join(rotationDir, 'journal.json');
+  let journal;
+  try {
+    journal = await readJson(journalPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      await rm(rotationDir, { recursive: true, force: true });
+      return;
+    }
+    throw new Error('资料库轮换状态损坏');
+  }
+  if (journal?.version !== VERSION || !['prepared', 'committed'].includes(journal.state)) {
+    throw new Error('资料库轮换状态损坏');
+  }
+
+  const backupDir = path.join(rotationDir, 'backup');
+  if (journal.state === 'prepared' || !(await fileExists(path.join(vaultDir, 'vault.json')))) {
+    if (!(await fileExists(path.join(backupDir, 'vault.json')))) {
+      throw new Error('资料库轮换恢复失败');
+    }
+    await replaceCanonicalVault(vaultDir, backupDir);
+  }
+  await rm(rotationDir, { recursive: true, force: true });
 }
 
 async function recordFiles(directory) {
@@ -172,6 +248,7 @@ export function createInquiryVaultStore(rootDir, options = {}) {
 
   async function status() {
     try {
+      await recoverRotation(vaultDir);
       const metadata = await readMetadata(vaultDir);
       return { exists: true, locked: !key, version: metadata.version };
     } catch (error) {
@@ -197,6 +274,7 @@ export function createInquiryVaultStore(rootDir, options = {}) {
   async function unlock(password) {
     let candidate = null;
     try {
+      await recoverRotation(vaultDir);
       const metadata = await readMetadata(vaultDir);
       candidate = deriveKey(password, Buffer.from(metadata.salt, 'base64'));
       verifyCheck(candidate, metadata);
@@ -216,21 +294,25 @@ export function createInquiryVaultStore(rootDir, options = {}) {
   async function read(bucket, id) {
     requireBucket(bucket);
     const normalizedId = requireId(id);
+    await recoverRotation(vaultDir);
     return readRecord(vaultDir, requireUnlocked(), bucket, normalizedId);
   }
 
   async function write(bucket, id, value) {
     requireBucket(bucket);
+    await recoverRotation(vaultDir);
     await writeRecord(vaultDir, requireUnlocked(), bucket, requireId(id), value);
   }
 
   async function list(bucket) {
     requireBucket(bucket);
+    await recoverRotation(vaultDir);
     return (await listRecords(vaultDir, requireUnlocked(), bucket)).map((record) => record.value);
   }
 
   async function remove(bucket, id) {
     requireBucket(bucket);
+    await recoverRotation(vaultDir);
     requireUnlocked();
     const normalizedId = requireId(id);
     try {
@@ -244,6 +326,7 @@ export function createInquiryVaultStore(rootDir, options = {}) {
 
   async function clearAccount(accountId) {
     const normalizedAccountId = requireId(accountId);
+    await recoverRotation(vaultDir);
     requireUnlocked();
     const conversations = await listRecords(vaultDir, key, 'conversations');
     const conversationIds = new Set(conversations
@@ -262,14 +345,16 @@ export function createInquiryVaultStore(rootDir, options = {}) {
   }
 
   async function clearAll() {
+    await recoverRotation(vaultDir);
     requireUnlocked();
-    for (const bucket of BUCKETS) {
-      const records = await listRecords(vaultDir, key, bucket);
-      await Promise.all(records.map((record) => remove(bucket, record.id)));
-    }
+    await Promise.all([...BUCKETS].map((bucket) => rm(path.join(vaultDir, bucket), {
+      recursive: true,
+      force: true,
+    })));
   }
 
   async function prune(now) {
+    await recoverRotation(vaultDir);
     requireUnlocked();
     const cutoff = Number(now) - RETENTION_MS;
     if (!Number.isFinite(cutoff)) throw new Error('清理时间无效');
@@ -292,14 +377,15 @@ export function createInquiryVaultStore(rootDir, options = {}) {
   }
 
   async function changePassword(oldPassword, newPassword) {
+    await recoverRotation(vaultDir);
     const currentKey = requireUnlocked();
     let oldKey = null;
     let newKey = null;
-    const siblingDir = `${vaultDir}.next-${crypto.randomUUID()}`;
-    const backupDir = `${vaultDir}.previous-${crypto.randomUUID()}`;
-    let oldMoved = false;
-    let siblingPromoted = false;
     let oldPasswordVerified = false;
+    const rotationDir = rotationDirectory(vaultDir);
+    const backupDir = path.join(rotationDir, 'backup');
+    const candidateDir = path.join(rotationDir, 'candidate');
+    const journalPath = path.join(rotationDir, 'journal.json');
     try {
       const metadata = await readMetadata(vaultDir);
       oldKey = deriveKey(oldPassword, Buffer.from(metadata.salt, 'base64'));
@@ -308,42 +394,37 @@ export function createInquiryVaultStore(rootDir, options = {}) {
 
       const salt = crypto.randomBytes(16);
       newKey = deriveKey(newPassword, salt);
-      await writeAtomic(path.join(siblingDir, 'vault.json'), metadataFor(newKey, salt));
+      await copyCanonicalVault(vaultDir, backupDir);
+      await writeAtomic(journalPath, { version: VERSION, state: 'prepared' });
+      await writeAtomic(path.join(candidateDir, 'vault.json'), metadataFor(newKey, salt));
       for (const bucket of BUCKETS) {
         for (const record of await listRecords(vaultDir, currentKey, bucket)) {
-          await writeRecord(siblingDir, newKey, bucket, record.id, record.value);
+          await writeRecord(candidateDir, newKey, bucket, record.id, record.value);
         }
       }
-      await verifyVault(siblingDir, newKey);
-
-      await rename(vaultDir, backupDir);
-      oldMoved = true;
-      await rename(siblingDir, vaultDir);
-      siblingPromoted = true;
-      try {
-        await rm(backupDir, { recursive: true, force: true });
-      } catch {
-        // The new vault is valid. A recoverable stale sibling is safer than a failed password change.
-      }
+      await verifyVault(candidateDir, newKey);
+      await replaceCanonicalVault(vaultDir, candidateDir);
+      await verifyVault(vaultDir, newKey);
+      await writeAtomic(journalPath, { version: VERSION, state: 'committed' });
       currentKey.fill(0);
       key = newKey;
       newKey = null;
-    } catch (error) {
-      if (oldMoved && !siblingPromoted) {
-        try { await rename(backupDir, vaultDir); } catch { /* preserve the original error */ }
+      try {
+        await rm(rotationDir, { recursive: true, force: true });
+      } catch {
+        // The committed journal will remove this ignored recovery state on the next vault access.
       }
-      if (siblingPromoted) {
-        // A promotion cannot be rolled back safely after success, so keep its verified key active.
-        currentKey.fill(0);
-        key = newKey;
-        newKey = null;
+    } catch (error) {
+      try {
+        await recoverRotation(vaultDir);
+      } catch (recoveryError) {
+        throw recoveryError;
       }
       if (!oldPasswordVerified) throw new Error('资料库密码错误');
       throw error;
     } finally {
       oldKey?.fill(0);
       newKey?.fill(0);
-      if (!siblingPromoted) await rm(siblingDir, { recursive: true, force: true });
     }
   }
 

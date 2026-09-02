@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -125,4 +125,56 @@ test('account clearing is scoped and clearAll preserves an unlocked vault', asyn
   await vault.clearAll();
   assert.deepEqual(await vault.list('accounts'), []);
   assert.deepEqual(await vault.status(), { exists: true, locked: false, version: 1 });
+});
+
+test('startup restores a prepared password rotation from the in-vault journal', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'inquiry-vault-'));
+  const vault = createInquiryVaultStore(root);
+  await vault.create('recovery rotation password');
+  await vault.write('settings', 'configuration', { locale: 'zh-CN' });
+
+  const vaultDir = path.join(root, 'data', 'inquiry-review');
+  const rotationDir = path.join(vaultDir, '.rotation');
+  await mkdir(path.join(rotationDir, 'backup'), { recursive: true });
+  await cp(path.join(vaultDir, 'vault.json'), path.join(rotationDir, 'backup', 'vault.json'));
+  await cp(path.join(vaultDir, 'settings'), path.join(rotationDir, 'backup', 'settings'), { recursive: true });
+  await writeFile(path.join(rotationDir, 'journal.json'), JSON.stringify({ version: 1, state: 'prepared' }));
+  await writeFile(path.join(vaultDir, 'settings', (await readdir(path.join(vaultDir, 'settings')))[0]), 'broken');
+
+  const restarted = createInquiryVaultStore(root);
+  assert.deepEqual(await restarted.status(), { exists: true, locked: true, version: 1 });
+  await restarted.unlock('recovery rotation password');
+  assert.deepEqual(await restarted.read('settings', 'configuration'), { locale: 'zh-CN' });
+  await assert.rejects(() => access(rotationDir), { code: 'ENOENT' });
+});
+
+test('clearAll removes corrupted records and temporary bucket files without decrypting them', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'inquiry-vault-'));
+  const vault = createInquiryVaultStore(root);
+  await vault.create('clear corrupt records password');
+  await vault.write('accounts', 'seller-01', { accountId: 'seller-01' });
+
+  const directory = path.join(root, 'data', 'inquiry-review', 'accounts');
+  const [name] = await readdir(directory);
+  await writeFile(path.join(directory, name), 'corrupted');
+  await writeFile(path.join(directory, `${name}.tmp`), 'temporary ciphertext');
+
+  await vault.clearAll();
+  await assert.rejects(() => access(directory), { code: 'ENOENT' });
+  assert.deepEqual(await vault.status(), { exists: true, locked: false, version: 1 });
+});
+
+test('failed atomic record writes remove their temporary ciphertext file', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'inquiry-vault-'));
+  const vault = createInquiryVaultStore(root);
+  await vault.create('atomic write cleanup password');
+  await vault.write('accounts', 'seller-01', { accountId: 'seller-01' });
+
+  const directory = path.join(root, 'data', 'inquiry-review', 'accounts');
+  const [name] = await readdir(directory);
+  await rm(path.join(directory, name));
+  await mkdir(path.join(directory, name));
+
+  await assert.rejects(() => vault.write('accounts', 'seller-01', { accountId: 'seller-01' }));
+  assert.deepEqual(await readdir(directory), [name]);
 });
