@@ -60,6 +60,20 @@ test('sync preserves the first message and records a content conflict', () => {
   assert.deepEqual(merged.conflicts, [{ messageId: 'm-1', reason: 'content_mismatch' }]);
 });
 
+test('merge keeps distinct messages without provider IDs and surfaces data-quality warnings', () => {
+  const first = { conversationId: 'conv-1', sendTime: 10, senderAccountId: 'buyer-01',
+    direction: 'buyer', content: 'First message' };
+  const second = { conversationId: 'conv-1', sendTime: 10, senderAccountId: 'buyer-01',
+    direction: 'buyer', content: 'Second message' };
+
+  const merged = mergeMessages([], [first, second]);
+
+  assert.deepEqual(merged.messages.map((item) => item.content), ['First message', 'Second message']);
+  assert.equal(merged.warnings.length, 2);
+  assert.deepEqual(merged.warnings.map((item) => item.reason), ['missing_message_id', 'missing_message_id']);
+  assert.ok(merged.warnings.every((item) => item.messageKey.startsWith('temporary:conv-1:10:buyer-01:')));
+});
+
 test('sync refuses disabled and unverified accounts before a client read', async () => {
   const vault = createMemoryVault();
   let reads = 0;
@@ -85,12 +99,106 @@ test('sync pauses before the next conversation page when the client closes', asy
   } });
   await saveVerifiedAccount(vault);
 
-  const result = await service.syncAccount({}, 'seller-01', { shouldContinue: () => false });
+  let checks = 0;
+  const result = await service.syncAccount({}, 'seller-01', { shouldContinue: () => {
+    checks += 1;
+    return checks === 1;
+  } });
 
   assert.equal(result.status, 'paused');
   assert.equal(conversationReads, 1);
   assert.deepEqual(await vault.read('cursors', 'seller-01'), {
     status: 'paused', code: 'client_closed', lastSuccessfulAt: 100, nextTimestamp: 'next',
+  });
+});
+
+test('sync resumes an interrupted message page before reading the conversation list again', async () => {
+  const vault = createMemoryVault();
+  const calls = [];
+  const service = createInquirySyncService({ vault, now: () => 100, client: {
+    async queryConversations() {
+      calls.push('conversations');
+      return { items: [], hasMore: false, nextTimestamp: null };
+    },
+    async queryMessages(_config, input) {
+      calls.push(`messages:${input.limitTimestamp}`);
+      return { items: [{ messageId: 'm-1', conversationId: 'conv-1', sendTime: 10,
+        direction: 'seller', content: 'Changed' }], hasMore: false, nextTimestamp: null };
+    },
+  } });
+  await saveVerifiedAccount(vault);
+  await vault.write('conversations', 'conv-1', {
+    conversationId: 'conv-1', accountId: 'seller-01', buyerAccountId: 'buyer-01',
+    buyerDisplayName: 'Buyer', latestMessageTime: 10,
+    messages: [{ messageId: 'm-1', conversationId: 'conv-1', sendTime: 10,
+      direction: 'buyer', content: 'Original' }],
+    metrics: {}, syncState: { status: 'syncing', nextTimestamp: '10' },
+    conflicts: [{ messageId: 'm-0', reason: 'content_mismatch' }],
+  });
+
+  await service.syncAccount({}, 'seller-01');
+
+  const saved = await vault.read('conversations', 'conv-1');
+  assert.deepEqual(calls, ['messages:10', 'conversations']);
+  assert.equal(saved.messages[0].direction, 'buyer');
+  assert.deepEqual(saved.conflicts, [
+    { messageId: 'm-0', reason: 'content_mismatch' },
+    { messageId: 'm-1', reason: 'content_mismatch' },
+  ]);
+  assert.equal(saved.syncState.status, 'complete');
+});
+
+test('sync checks a closed client before the first message request', async () => {
+  const vault = createMemoryVault();
+  let messageReads = 0;
+  const service = createInquirySyncService({ vault, now: () => 100, client: {
+    async queryConversations() {
+      return { items: [{ conversationId: 'conv-1', latestMessageTime: 20 }], hasMore: false, nextTimestamp: null };
+    },
+    async queryMessages() { messageReads += 1; return { items: [], hasMore: false, nextTimestamp: null }; },
+  } });
+  await saveVerifiedAccount(vault);
+  let checks = 0;
+
+  const result = await service.syncAccount({}, 'seller-01', { shouldContinue: () => {
+    checks += 1;
+    return checks === 1;
+  } });
+
+  assert.equal(result.status, 'paused');
+  assert.equal(messageReads, 0);
+  assert.deepEqual(await vault.read('cursors', 'seller-01'), {
+    status: 'paused', code: 'client_closed', lastSuccessfulAt: 100,
+  });
+});
+
+test('sync checks a closed client between conversations returned in one page', async () => {
+  const vault = createMemoryVault();
+  const messageReads = [];
+  const service = createInquirySyncService({ vault, now: () => 100, client: {
+    async queryConversations() {
+      return { items: [
+        { conversationId: 'conv-1', latestMessageTime: 20 },
+        { conversationId: 'conv-2', latestMessageTime: 19 },
+      ], hasMore: false, nextTimestamp: null };
+    },
+    async queryMessages(_config, input) {
+      messageReads.push(input.conversationId);
+      return { items: [], hasMore: false, nextTimestamp: null };
+    },
+  } });
+  await saveVerifiedAccount(vault);
+  let checks = 0;
+
+  const result = await service.syncAccount({}, 'seller-01', { shouldContinue: () => {
+    checks += 1;
+    return checks < 3;
+  } });
+
+  assert.equal(result.status, 'paused');
+  assert.deepEqual(messageReads, ['conv-1']);
+  assert.deepEqual(await vault.read('cursors', 'seller-01'), {
+    status: 'paused', code: 'client_closed', lastSuccessfulAt: 100,
   });
 });
 

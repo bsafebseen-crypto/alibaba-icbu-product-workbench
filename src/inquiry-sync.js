@@ -21,6 +21,17 @@ function stableHash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function messageIdentity(item) {
+  const messageId = String(item.messageId ?? '').trim();
+  if (messageId) return { key: `id:${messageId}` };
+  const conversationId = String(item.conversationId ?? '').trim();
+  const sendTime = String(item.sendTime ?? '');
+  const sender = String(item.senderAccountId ?? item.direction ?? '').trim();
+  const contentHash = crypto.createHash('sha256').update(String(item.content ?? '')).digest('hex');
+  const messageKey = `temporary:${conversationId}:${sendTime}:${sender}:${contentHash}`;
+  return { key: messageKey, warning: { messageKey, reason: 'missing_message_id' } };
+}
+
 function errorCode(error) {
   const value = String(error?.code || 'sync_failed');
   return new Set([
@@ -49,6 +60,16 @@ function appendConflicts(existing, additions) {
   });
 }
 
+function appendWarnings(existing, additions) {
+  const seen = new Set();
+  return [...existing, ...additions].filter((warning) => {
+    const key = `${warning.messageKey}:${warning.reason}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function matchesConversation(conversation, filters = {}) {
   if (filters.accountId && conversation.accountId !== filters.accountId) return false;
   if (filters.unanswered !== undefined) {
@@ -64,19 +85,28 @@ function matchesConversation(conversation, filters = {}) {
 }
 
 export function mergeMessages(existing, incoming) {
-  const byId = new Map(existing.map((item) => [item.messageId, structuredClone(item)]));
+  const byId = new Map();
   const conflicts = [];
+  const warnings = [];
+  for (const item of existing) {
+    const identity = messageIdentity(item);
+    byId.set(identity.key, structuredClone(item));
+    if (identity.warning) warnings.push(identity.warning);
+  }
   for (const item of incoming) {
-    const previous = byId.get(item.messageId);
-    if (!previous) byId.set(item.messageId, structuredClone(item));
+    const identity = messageIdentity(item);
+    const previous = byId.get(identity.key);
+    if (!previous) byId.set(identity.key, structuredClone(item));
     else if (stableHash(previous) !== stableHash(item)) {
-      conflicts.push({ messageId: item.messageId, reason: 'content_mismatch' });
+      conflicts.push({ messageId: item.messageId || identity.key, reason: 'content_mismatch' });
     }
+    if (identity.warning) warnings.push(identity.warning);
   }
   return {
     messages: [...byId.values()].sort((a, b) => a.sendTime - b.sendTime
       || String(a.messageId).localeCompare(String(b.messageId))),
     conflicts,
+    warnings: appendWarnings([], warnings),
   };
 }
 
@@ -111,14 +141,17 @@ export function createInquirySyncService({ vault, client, now = Date.now } = {})
       metrics: calculateConversationMetrics(merged.messages, currentTime(now)),
       syncState: { status, lastSuccessfulAt: currentTime(now), ...(nextTimestamp ? { nextTimestamp } : {}) },
       conflicts: appendConflicts(existing?.conflicts || [], merged.conflicts),
+      dataQualityWarnings: appendWarnings(existing?.dataQualityWarnings || [], merged.warnings),
     };
     await vault.write('conversations', stored.conversationId, stored);
     return stored;
   }
 
-  async function synchronizeConversation(config, account, conversation, shouldContinue) {
-    let nextTimestamp;
+  async function synchronizeConversation(config, account, conversation, shouldContinue, startingTimestamp = null) {
+    let nextTimestamp = startingTimestamp;
     do {
+      const paused = await shouldMakeNextRequest(shouldContinue, account.accountId, {});
+      if (paused) return paused;
       let page;
       try {
         page = await client.queryMessages(config, {
@@ -135,10 +168,6 @@ export function createInquirySyncService({ vault, client, now = Date.now } = {})
       await storeMessagePage(account, conversation, page.items || [], page.nextTimestamp,
         page.hasMore ? 'syncing' : 'complete');
       nextTimestamp = page.hasMore ? page.nextTimestamp : null;
-      if (nextTimestamp) {
-        const paused = await shouldMakeNextRequest(shouldContinue, account.accountId, {});
-        if (paused) return paused;
-      }
     } while (nextTimestamp);
     return null;
   }
@@ -180,9 +209,23 @@ export function createInquirySyncService({ vault, client, now = Date.now } = {})
     }
 
     const priorCursor = await vault.read('cursors', account.accountId);
+    const interruptedConversations = (await vault.list('conversations')).filter((conversation) => (
+      conversation.accountId === account.accountId
+      && conversation.syncState?.status === 'syncing'
+      && conversation.syncState.nextTimestamp
+    ));
+    for (const conversation of interruptedConversations) {
+      const paused = await synchronizeConversation(
+        config, account, conversation, shouldContinue, conversation.syncState.nextTimestamp,
+      );
+      if (paused) return { status: 'paused', synchronized: 0 };
+    }
     let nextTimestamp = priorCursor?.status === 'paused' ? priorCursor.nextTimestamp : null;
     let synchronized = 0;
     do {
+      const paused = await shouldMakeNextRequest(shouldContinue, account.accountId,
+        nextTimestamp ? { nextTimestamp } : {});
+      if (paused) return { status: 'paused', synchronized };
       let page;
       try {
         page = await client.queryConversations(config, {
@@ -211,10 +254,6 @@ export function createInquirySyncService({ vault, client, now = Date.now } = {})
         lastSuccessfulAt: currentTime(now),
         ...(nextTimestamp ? { nextTimestamp } : {}),
       });
-      if (nextTimestamp) {
-        const paused = await shouldMakeNextRequest(shouldContinue, account.accountId, { nextTimestamp });
-        if (paused) return { status: 'paused', synchronized };
-      }
     } while (nextTimestamp);
 
     return { status: 'complete', synchronized };
