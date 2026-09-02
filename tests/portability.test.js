@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,9 +15,16 @@ test('Windows launcher installs locked dependencies on a clean clone', async () 
 
 test('gitignore excludes machine-local dependencies, credentials, tasks, and temporary files', async () => {
   const ignore = await readFile(path.join(rootDir, '.gitignore'), 'utf8');
-  for (const entry of ['node_modules/', 'data/tasks/', '.env', '*.log', 'tmp/']) {
+  for (const entry of ['node_modules/', 'data/tasks/', 'data/inquiry-review/', '.env', '*.log', 'tmp/']) {
     assert.match(ignore, new RegExp(`^${entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
   }
+});
+
+test('vault tests use temporary directories instead of a repository fixture', async () => {
+  await assert.rejects(
+    () => access(path.join(rootDir, 'tests', 'fixtures', 'inquiry-vault')),
+    { code: 'ENOENT' },
+  );
 });
 
 test('portable project files do not contain a developer-specific absolute path', async () => {

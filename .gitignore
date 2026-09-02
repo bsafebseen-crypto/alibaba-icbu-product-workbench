@@ -1,5 +1,6 @@
 node_modules/
 data/tasks/
+data/inquiry-review/
 .env
 .env.*
 *.log
