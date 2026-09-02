@@ -76,7 +76,7 @@ import {
 } from '../src/inquiry-client.js';
 
 const config = {
-  gatewayUrl: 'https://eco.example.com/router/rest',
+  inquiryGatewayUrl: 'https://eco.example.com/router/rest',
   appKey: 'fictional-key',
   appSecret: 'fictional-secret',
 };
@@ -142,7 +142,7 @@ const METHODS = Object.freeze({
 });
 
 function requireConfig(config = {}) {
-  const gatewayUrl = String(config.gatewayUrl || 'https://eco.taobao.com/router/rest').trim();
+  const gatewayUrl = String(config.inquiryGatewayUrl || 'https://eco.taobao.com/router/rest').trim();
   const appKey = String(config.appKey || '').trim();
   const appSecret = String(config.appSecret || '').trim();
   if (!gatewayUrl.startsWith('https://')) throw new Error('询盘网关必须使用 HTTPS');
@@ -736,7 +736,9 @@ Implement only these routes:
 
 The preview fingerprint is SHA-256 over conversation ID, ordered message IDs, message content hashes, redaction version, and model name. The run route recomputes it so changed messages or model settings invalidate confirmation.
 
-Keep successful account probes in an in-memory map for 10 minutes. `/accounts/save` requires a matching unexpired probe entry and consumes it; callers cannot bypass the probe by posting directly to save. Track failed unlock attempts in memory and reject attempts made before `min(30 seconds, 2 ** failures seconds)` has elapsed. For `/sync`, set a `clientClosed` flag on the request `close` event and pass `shouldContinue: () => !clientClosed` to the sync service.
+Keep successful account probes in an in-memory map for 10 minutes. `/accounts/save` requires a matching unexpired probe entry and consumes it; callers cannot bypass the probe by posting directly to save. Track failed unlock attempts in memory and reject attempts made before `min(30 seconds, 2 ** failures seconds)` has elapsed. For `/sync`, set a `clientClosed` flag on the request `aborted` event and on the response `close` event only when `response.writableEnded` is false; pass `shouldContinue: () => !clientClosed` to the sync service. Do not use the request `close` event because Node emits it after a normal completed request.
+
+Inquiry probe and sync bodies pass only `{appKey,appSecret}` from the existing Alibaba form. The inquiry client uses its own `inquiryGatewayUrl`, defaulting to `https://eco.taobao.com/router/rest`; it must never inherit the product API `gatewayUrl` value.
 
 - [ ] **Step 4: Wire handler and dependencies into the server**
 
@@ -978,6 +980,7 @@ git commit -m "feat: connect inquiry review interface"
 - Modify: `README.md`
 - Modify: `WORK_MACHINE_SETUP.md`
 - Modify: `AGENTS.md`
+- Modify: `tests/portability.test.js`
 - Test: all files under `tests/`
 
 **Interfaces:**
