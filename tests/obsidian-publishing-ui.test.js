@@ -93,7 +93,7 @@ test('buildSharedImageAssignments rotates shared images and uniqueAssignmentImag
   const assignments = buildSharedImageAssignments(state);
 
   assert.deepEqual(assignments[1].files.map((image) => image.fileName), [
-    'main-1.jpg', 'b.jpg', 'c.jpg', 'a.jpg', '2.jpg', '证书主图.jpg',
+    'main-1.jpg', '证书主图.jpg', 'b.jpg', 'c.jpg', 'a.jpg', '2.jpg',
   ]);
   assert.equal(uniqueAssignmentImages(assignments).length, 9);
 });

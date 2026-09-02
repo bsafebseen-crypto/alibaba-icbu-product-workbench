@@ -29,10 +29,11 @@ export function assignSharedProductImages({
     if (!planId) throw new Error('类似品方案 ID 不能为空');
     const files = [
       mains[index],
+      fixed[1],
       marketing[index % marketing.length],
       marketing[(index + 1) % marketing.length],
       marketing[(index + 2) % marketing.length],
-      ...fixed,
+      fixed[0],
     ].map((image) => ({ ...image }));
     if (new Set(files.map((image) => image.sha256)).size !== files.length) {
       throw new Error(`${planId} 的 6 张图片不能包含重复内容`);

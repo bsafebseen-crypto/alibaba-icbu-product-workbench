@@ -28,10 +28,10 @@ test('assignSharedProductImages rotates a three-image marketing pool in stable o
     planId: assignment.planId,
     names: assignment.files.map((item) => item.fileName),
   })), [
-    { planId: 'plan-2', names: ['main-0.jpg', 'a.jpg', 'b.jpg', 'c.jpg', '2.jpg', '证书主图.jpg'] },
-    { planId: 'plan-3', names: ['main-1.jpg', 'b.jpg', 'c.jpg', 'a.jpg', '2.jpg', '证书主图.jpg'] },
-    { planId: 'plan-4', names: ['main-2.jpg', 'c.jpg', 'a.jpg', 'b.jpg', '2.jpg', '证书主图.jpg'] },
-    { planId: 'plan-5', names: ['main-3.jpg', 'a.jpg', 'b.jpg', 'c.jpg', '2.jpg', '证书主图.jpg'] },
+    { planId: 'plan-2', names: ['main-0.jpg', '证书主图.jpg', 'a.jpg', 'b.jpg', 'c.jpg', '2.jpg'] },
+    { planId: 'plan-3', names: ['main-1.jpg', '证书主图.jpg', 'b.jpg', 'c.jpg', 'a.jpg', '2.jpg'] },
+    { planId: 'plan-4', names: ['main-2.jpg', '证书主图.jpg', 'c.jpg', 'a.jpg', 'b.jpg', '2.jpg'] },
+    { planId: 'plan-5', names: ['main-3.jpg', '证书主图.jpg', 'a.jpg', 'b.jpg', 'c.jpg', '2.jpg'] },
   ]);
 });
 
@@ -44,10 +44,10 @@ test('assignSharedProductImages uses different three-image windows from a larger
   });
 
   assert.deepEqual(result[1].files.map((item) => item.fileName), [
-    'main-1.jpg', 'b.jpg', 'c.jpg', 'd.jpg', '2.jpg', '证书主图.jpg',
+    'main-1.jpg', '证书主图.jpg', 'b.jpg', 'c.jpg', 'd.jpg', '2.jpg',
   ]);
   assert.deepEqual(result[3].files.map((item) => item.fileName), [
-    'main-3.jpg', 'd.jpg', 'a.jpg', 'b.jpg', '2.jpg', '证书主图.jpg',
+    'main-3.jpg', '证书主图.jpg', 'd.jpg', 'a.jpg', 'b.jpg', '2.jpg',
   ]);
 });
 
