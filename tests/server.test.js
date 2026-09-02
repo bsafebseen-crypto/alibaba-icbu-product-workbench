@@ -407,11 +407,11 @@ test('GET / serves the workbench page and client script', async () => {
     const html = await response.text();
     assert.equal(response.status, 200);
     assert.match(html, /国际站自动上品/);
-    assert.match(html, /data-module="auto-listing"/);
-    assert.match(html, /data-module="dashboard"/);
-    assert.match(html, /data-module="product-pool"/);
-    assert.match(html, /data-module="keywords"/);
-    assert.match(html, /data-module="ai-settings"/);
+    const sidebar = html.match(/<nav class="module-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
+    assert.deepEqual([...sidebar.matchAll(/data-module="([^"]+)"/g)].map((match) => match[1]), [
+      'obsidian-publishing', 'alibaba-settings',
+    ]);
+    assert.match(sidebar, /data-module="obsidian-publishing"[^>]*aria-current="page"/);
     assert.match(html, /data-module="alibaba-settings"/);
     assert.match(html, /id="ali-authorize"/);
     assert.match(html, /id="ali-auth-code"/);
@@ -435,7 +435,8 @@ test('GET / serves the workbench page and client script', async () => {
     assert.match(html, /id="ali-photobank-group"/);
     assert.match(html, /id="operations-topbar"/);
     assert.match(html, /id="top-local-state"/);
-    assert.match(html, /id="module-dashboard"/);
+    assert.match(html, /<section class="module-page" id="module-dashboard"[^>]*hidden>/);
+    assert.match(html, /<section class="module-page active" id="module-obsidian-publishing"/);
     assert.match(html, /id="module-product-pool"/);
     assert.match(html, /id="pool-search"/);
     assert.match(html, /id="pool-stage"/);
