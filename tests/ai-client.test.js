@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { generateProducts, generateSimilarProducts, testAiConnection } from '../src/ai-client.js';
+import {
+  generateProducts, generateSimilarProducts, requestAiCompletion, testAiConnection,
+} from '../src/ai-client.js';
 
 function jsonResponse(body, ok = true, status = 200) {
   return {
@@ -48,6 +50,21 @@ test('testAiConnection returns a readable provider error', async () => {
   );
 
   assert.deepEqual(result, { ok: false, message: 'Invalid API key' });
+});
+
+test('requestAiCompletion returns normalized content and token usage', async () => {
+  const completion = await requestAiCompletion(
+    { baseUrl: 'https://models.example.com/v1', apiKey: 'key', model: 'model' },
+    { messages: [{ role: 'user', content: 'Hello' }] },
+    async () => jsonResponse({
+      choices: [{ message: { content: '  OK  ' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
+    }),
+  );
+
+  assert.deepEqual(completion, {
+    content: 'OK', usage: { promptTokens: 3, completionTokens: 4, totalTokens: 7 },
+  });
 });
 
 test('generateProducts requests JSON and returns five normalized products', async () => {

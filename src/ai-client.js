@@ -12,7 +12,7 @@ function requireConfig(config) {
   return { baseUrl, apiKey, model };
 }
 
-async function requestCompletion(config, body, fetchImpl) {
+export async function requestAiCompletion(config, body, fetchImpl = fetch) {
   const { baseUrl, apiKey, model } = requireConfig(config);
   const response = await fetchImpl(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -32,12 +32,19 @@ async function requestCompletion(config, body, fetchImpl) {
   if (typeof content !== 'string' || !content.trim()) {
     throw new Error('模型没有返回可用内容');
   }
-  return content.trim();
+  return {
+    content: content.trim(),
+    usage: {
+      promptTokens: Number(payload.usage?.prompt_tokens || 0),
+      completionTokens: Number(payload.usage?.completion_tokens || 0),
+      totalTokens: Number(payload.usage?.total_tokens || 0),
+    },
+  };
 }
 
 export async function testAiConnection(config, fetchImpl = fetch) {
   try {
-    await requestCompletion(
+    await requestAiCompletion(
       config,
       {
         messages: [{ role: 'user', content: 'Reply with OK.' }],
@@ -68,7 +75,7 @@ export async function generateProducts(config, source, fetchImpl = fetch) {
     words: Array.isArray(source?.words) ? source.words : [],
     manualFacts: String(source?.manualFacts ?? '').trim(),
   };
-  const content = await requestCompletion(
+  const { content } = await requestAiCompletion(
     config,
     {
       response_format: { type: 'json_object' },
@@ -153,7 +160,7 @@ export async function generateSimilarProducts(config, source, fetchImpl = fetch)
     }
   }
 
-  const content = await requestCompletion(
+  const { content } = await requestAiCompletion(
     config,
     {
       response_format: { type: 'json_object' },
