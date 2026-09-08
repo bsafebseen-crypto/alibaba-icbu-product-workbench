@@ -86,3 +86,31 @@ export function compareDraftToPlan(plan = {}, analysis = {}) {
     .map(([name]) => name);
   return { exactMatch: differences.length === 0, fields, differences };
 }
+
+export function comparePublishedProductToPlan(plan = {}, analysis = {}, expectedImageIds = []) {
+  const result = compareDraftToPlan(plan, analysis);
+  const images = Array.isArray(analysis?.recognized?.images?.items)
+    ? analysis.recognized.images.items
+    : [];
+  const actualImageIds = images.map((image) => String(image?.fileId || '').trim());
+  const normalizedExpectedIds = Array.isArray(expectedImageIds)
+    ? expectedImageIds.map((id) => String(id || '').trim())
+    : [];
+  const completeMetadata = images.every((image) => (
+    String(image?.fileId || '').trim() && String(image?.url || '').trim()
+  ));
+  const exactOrder = normalizedExpectedIds.length === 6
+    && equal(actualImageIds, normalizedExpectedIds);
+  result.fields.images = {
+    match: images.length === 6 && completeMetadata && exactOrder,
+    expectedCount: 6,
+    actualCount: images.length,
+    completeMetadata,
+    exactOrder,
+  };
+  result.differences = Object.entries(result.fields)
+    .filter(([, field]) => !field.match)
+    .map(([name]) => name);
+  result.exactMatch = result.differences.length === 0;
+  return result;
+}

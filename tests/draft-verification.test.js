@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { compareDraftToPlan } from '../src/draft-verification.js';
+import { compareDraftToPlan, comparePublishedProductToPlan } from '../src/draft-verification.js';
 
 const plan = {
   title: 'Expected title',
@@ -100,5 +100,23 @@ test('compareDraftToPlan treats attribute order-only changes as matching content
     expectedCount: 10,
     actualCount: 10,
     orderChanged: true,
+  });
+});
+
+test('formal publication comparison requires the six exact image ids in order', () => {
+  const expectedImageIds = Array.from({ length: 6 }, (_, index) => `file-${index}`);
+  assert.equal(comparePublishedProductToPlan(plan, matchingAnalysis(), expectedImageIds).exactMatch, true);
+
+  const different = matchingAnalysis();
+  different.recognized.images.items[5].fileId = 'different-file';
+  const result = comparePublishedProductToPlan(plan, different, expectedImageIds);
+  assert.equal(result.exactMatch, false);
+  assert.deepEqual(result.differences, ['images']);
+  assert.deepEqual(result.fields.images, {
+    match: false,
+    expectedCount: 6,
+    actualCount: 6,
+    completeMetadata: true,
+    exactOrder: false,
   });
 });
