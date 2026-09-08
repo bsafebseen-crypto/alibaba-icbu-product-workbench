@@ -448,6 +448,7 @@ export function createServer(options = {}) {
             context,
             schemaXml,
             sellingPointBinding,
+            activeDraftPlanId: '',
             previews: new Map(previews.map((preview) => [preview.planId, {
               previewXml: preview.previewXml,
               fingerprint: preview.fingerprint,
@@ -523,7 +524,12 @@ export function createServer(options = {}) {
         if (!session) throw Object.assign(new Error('预览会话已失效，请重新生成完整预览'), { status: 409 });
         const preview = session.previews.get(String(body.planId || ''));
         if (!preview) throw Object.assign(new Error('预览会话中不存在这个方案'), { status: 400 });
+        if (session.activeDraftPlanId) {
+          throw Object.assign(new Error('另一份草稿正在创建并核验，请等待完成'), { status: 409 });
+        }
+        session.activeDraftPlanId = String(body.planId || '');
 
+        try {
         let task = await readObsidianPublishingTask(rootDir, session.taskId);
         const item = task.items.find((candidate) => candidate.planId === body.planId);
         if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
@@ -570,6 +576,19 @@ export function createServer(options = {}) {
             schemaXml: preview.previewXml,
             publishContext: session.context,
           });
+          try {
+            await loadAlibabaProductDraft(body.config, {
+              productId: result.productId,
+              categoryId: session.context.categoryId,
+              language: session.context.language,
+            });
+          } catch (error) {
+            const verificationError = new Error(
+              `阿里已返回草稿 ID ${result.productId}，但只读核验失败：${error.message}`,
+            );
+            verificationError.traceId = error.traceId || result.traceId;
+            throw verificationError;
+          }
           const completed = finishDraftAttempt(submitting, result, new Date().toISOString());
           task = await updateObsidianDraftItem(
             rootDir, session.taskId, body.planId, completed, task.version,
@@ -588,6 +607,9 @@ export function createServer(options = {}) {
             taskVersion: task.version,
             item: completed,
           });
+        }
+        } finally {
+          session.activeDraftPlanId = '';
         }
         return;
       }

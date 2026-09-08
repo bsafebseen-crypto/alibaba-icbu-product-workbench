@@ -22,6 +22,7 @@ export function createObsidianPublishingState() {
     sessionId: '',
     taskId: '',
     draftItems: {},
+    draftSubmissionPlanId: '',
     savedDrafts: [],
     loading: false,
     error: '',
@@ -110,6 +111,19 @@ export function invalidatePreviewState(state) {
   state.sessionId = '';
   state.taskId = '';
   state.draftItems = {};
+  state.draftSubmissionPlanId = '';
+}
+
+export function beginDraftSubmission(state, planId) {
+  if (state.draftSubmissionPlanId) return false;
+  state.draftSubmissionPlanId = String(planId || '');
+  return Boolean(state.draftSubmissionPlanId);
+}
+
+export function finishDraftSubmission(state, planId) {
+  if (state.draftSubmissionPlanId === String(planId || '')) {
+    state.draftSubmissionPlanId = '';
+  }
 }
 
 export function remainingPlans(batch, basePlanId) {
@@ -475,6 +489,13 @@ export function initObsidianPublishing({
     elements.confirmSellingPoint.title = state.sellingPointBinding
       ? state.sellingPointBindingConfirmed ? '当前类目版本已确认并自动复用。' : ''
       : '先只读加载正式母商品，工作台会从其 Schema 识别卖点字段。';
+  }
+
+  function syncDraftSubmissionControls() {
+    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((button) => {
+      const item = state.draftItems[button.dataset.planId];
+      button.disabled = Boolean(state.draftSubmissionPlanId) || item?.status !== 'preview_ready';
+    });
   }
 
   function invalidateSharedImagePreview(message = '共享图片已经变化，请重新生成完整预览。') {
@@ -931,9 +952,10 @@ export function initObsidianPublishing({
     );
     if (!confirmed) return;
 
-    button.disabled = true;
-    button.textContent = '正在创建草稿…';
-    text(elements.draftStatus, `正在提交 ${planId}；不会自动提交下一份。`);
+    if (!beginDraftSubmission(state, planId)) return;
+    syncDraftSubmissionControls();
+    button.textContent = '正在创建并核验…';
+    text(elements.draftStatus, `正在提交并只读核验 ${planId}；完成前其他方案已锁定。`);
     try {
       const result = await requestJson('/api/obsidian/draft', {
         method: 'POST',
@@ -949,7 +971,7 @@ export function initObsidianPublishing({
       button.textContent = `草稿已创建 · ${result.item.draftProductId}`;
       const card = button.closest('.obsidian-variant-card');
       text(card?.querySelector('.obsidian-variant-status'), `草稿 ID ${result.item.draftProductId}`);
-      text(elements.draftStatus, `${planId} 草稿已创建。请先在阿里后台核对，再继续下一份。`);
+      text(elements.draftStatus, `${planId} 草稿已创建且阿里接口反查成功。请先在阿里后台核对，再继续下一份。`);
       await refreshSavedDrafts();
     } catch (error) {
       if (error.item) state.draftItems[planId] = error.item;
@@ -963,6 +985,9 @@ export function initObsidianPublishing({
         button.textContent = '无法创建草稿';
         text(elements.draftStatus, error.message);
       }
+    } finally {
+      finishDraftSubmission(state, planId);
+      syncDraftSubmissionControls();
     }
   });
 

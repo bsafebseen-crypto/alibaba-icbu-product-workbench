@@ -1003,6 +1003,7 @@ test('POST /api/obsidian/preview permits an explicitly confirmed replacement bou
 
 test('POST /api/obsidian/draft requires confirmation and creates one fingerprint-bound draft', async () => {
   let draftCalls = 0;
+  let verificationCalls = 0;
   await withServer(async (baseUrl) => {
     const previewResponse = await fetch(`${baseUrl}/api/obsidian/preview`, {
       method: 'POST',
@@ -1052,6 +1053,7 @@ test('POST /api/obsidian/draft requires confirmation and creates one fingerprint
     assert.equal(result.item.status, 'draft_created');
     assert.equal(result.item.draftProductId, 'draft-variant-1');
     assert.equal(draftCalls, 1);
+    assert.equal(verificationCalls, 1);
 
     const duplicate = await fetch(`${baseUrl}/api/obsidian/draft`, {
       method: 'POST',
@@ -1075,6 +1077,131 @@ test('POST /api/obsidian/draft requires confirmation and creates one fingerprint
       assert.equal(input.publishContext.categoryId, '32905');
       return { productId: 'draft-variant-1', traceId: 'trace-1', requestId: 'request-1' };
     },
+    loadAlibabaProductDraft: async (config, input) => {
+      verificationCalls += 1;
+      assert.equal(config.appKey, 'key');
+      assert.deepEqual(input, {
+        productId: 'draft-variant-1', categoryId: '32905', language: 'en_US',
+      });
+      return { schemaXml: '<verified-draft />', traceId: 'verify-trace-1' };
+    },
+  });
+});
+
+test('POST /api/obsidian/draft marks the result unknown when Alibaba returns an unreadable draft id', async () => {
+  await withServer(async (baseUrl) => {
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base',
+        sourceContext: {
+          sourceProductType: 'sourcing', categoryId: '32905', language: 'en_US',
+          publishType: 'default', version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        planIds: ['variant-1'], sellingPointBinding,
+        imagesByPlan: {
+          'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+        },
+      }),
+    })).json();
+
+    const response = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' }, sessionId: prepared.sessionId,
+        planId: 'variant-1', fingerprint: 'hash-variant-1', confirmed: true,
+      }),
+    });
+
+    assert.equal(response.status, 502);
+    const result = await response.json();
+    assert.equal(result.item.status, 'result_unknown');
+    assert.match(result.error, /草稿 ID draft-variant-1.*只读核验失败/);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({
+      previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'],
+    }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    createAlibabaProductDraft: async () => ({
+      productId: 'draft-variant-1', traceId: 'create-trace-1', requestId: 'request-1',
+    }),
+    loadAlibabaProductDraft: async () => {
+      throw Object.assign(new Error('Record does not exist'), { traceId: 'verify-trace-1' });
+    },
+  });
+});
+
+test('POST /api/obsidian/draft serializes creation across plans in one preview session', async () => {
+  let draftCalls = 0;
+  let releaseFirstDraft;
+  const firstDraftPending = new Promise((resolve) => { releaseFirstDraft = resolve; });
+  let firstDraftStarted;
+  const firstDraftStartedPromise = new Promise((resolve) => { firstDraftStarted = resolve; });
+
+  await withServer(async (baseUrl) => {
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base',
+        sourceContext: {
+          sourceProductType: 'sourcing', categoryId: '32905', language: 'en_US',
+          publishType: 'default', version: 'trade.1.1', schemaXml: '<itemSchema />',
+        },
+        planIds: ['variant-1', 'variant-2'], sellingPointBinding,
+        imagesByPlan: Object.fromEntries(['variant-1', 'variant-2'].map((planId) => [
+          planId, Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+        ])),
+      }),
+    })).json();
+    const requestBody = (planId) => ({
+      config: { appKey: 'key' }, sessionId: prepared.sessionId, planId,
+      fingerprint: `hash-${planId}`, confirmed: true,
+    });
+
+    const firstResponsePromise = fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody('variant-1')),
+    });
+    await firstDraftStartedPromise;
+
+    const secondResponse = await fetch(`${baseUrl}/api/obsidian/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody('variant-2')),
+    });
+    assert.equal(secondResponse.status, 409);
+    assert.match((await secondResponse.json()).error, /另一份草稿正在创建并核验/);
+    assert.equal(draftCalls, 1);
+
+    releaseFirstDraft();
+    const firstResponse = await firstResponsePromise;
+    assert.equal(firstResponse.status, 201);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch-1', plans: [] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }, { planId: 'variant-2' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: (_schemaXml, variant) => ({
+      previewXml: `<preview plan="${variant.planId}" />`,
+      fingerprint: `hash-${variant.planId}`,
+      changedFields: ['title'],
+    }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    createAlibabaProductDraft: async (_config, input) => {
+      draftCalls += 1;
+      if (input.schemaXml.includes('variant-1')) {
+        firstDraftStarted();
+        await firstDraftPending;
+      }
+      return { productId: `draft-${draftCalls}`, traceId: `trace-${draftCalls}` };
+    },
+    loadAlibabaProductDraft: async () => ({ schemaXml: '<verified-draft />' }),
   });
 });
 

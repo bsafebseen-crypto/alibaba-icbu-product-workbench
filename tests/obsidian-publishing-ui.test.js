@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildPreviewRequest,
+  beginDraftSubmission,
   buildSharedImageAssignments,
   canGenerateCompletePreviews,
   createObsidianPublishingState,
@@ -10,6 +11,7 @@ import {
   formatBatchLoadStatus,
   formatDraftVerification,
   formatPreviewSuccess,
+  finishDraftSubmission,
   imageFileKey,
   imageContentKey,
   invalidatePreviewState,
@@ -76,10 +78,23 @@ test('createObsidianPublishingState starts without persisted product data', () =
     sessionId: '',
     taskId: '',
     draftItems: {},
+    draftSubmissionPlanId: '',
     savedDrafts: [],
     loading: false,
     error: '',
   });
+});
+
+test('draft submission state locks every plan until the active request finishes', () => {
+  const state = createObsidianPublishingState();
+
+  assert.equal(beginDraftSubmission(state, 'plan-2'), true);
+  assert.equal(state.draftSubmissionPlanId, 'plan-2');
+  assert.equal(beginDraftSubmission(state, 'plan-3'), false);
+  finishDraftSubmission(state, 'plan-3');
+  assert.equal(state.draftSubmissionPlanId, 'plan-2');
+  finishDraftSubmission(state, 'plan-2');
+  assert.equal(state.draftSubmissionPlanId, '');
 });
 
 test('preferredBatchPath automatically selects the newest valid Markdown batch', () => {
