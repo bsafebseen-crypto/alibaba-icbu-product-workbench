@@ -455,4 +455,85 @@ export async function createAlibabaProductDraft(
   };
 }
 
+export async function createAlibabaProduct(
+  config,
+  { schemaXml, publishContext } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const xml = String(schemaXml || '').trim();
+  if (!xml) throw new Error('正式发布 Schema 不能为空');
+  const categoryId = String(publishContext?.categoryId || '').trim();
+  const language = String(publishContext?.language || '').trim();
+  const publishType = String(publishContext?.publishType || '').trim();
+  const version = String(publishContext?.version || '').trim();
+  if (!categoryId || !language || !publishType) throw new Error('正式发布上下文不完整');
+
+  const body = await callAlibabaApi(config, 'alibaba.icbu.product.schema.add', {
+    param_product_top_publish_request: {
+      publish_type: publishType,
+      xml,
+      cat_id: categoryId,
+      language,
+      ...(version ? { version } : {}),
+    },
+  }, fetchImpl, timestamp);
+  const result = body.alibaba_icbu_product_schema_add_response || body;
+  const bizSuccess = result.biz_success === true || result.biz_success === 'true';
+  if (!bizSuccess) {
+    const error = new Error(result.message || '阿里明确返回正式发布失败');
+    error.code = result.msg_code || '';
+    error.traceId = result.trace_id || '';
+    error.requestId = body.request_id || result.request_id || '';
+    error.definitive = result.biz_success === false || result.biz_success === 'false';
+    throw error;
+  }
+  const productId = String(result.product_id || '').trim();
+  if (!productId) throw new Error('阿里返回发布成功，但没有正式商品 ID');
+  return {
+    productId,
+    traceId: result.trace_id || '',
+    requestId: body.request_id || result.request_id || '',
+  };
+}
+
+export async function listAlibabaProducts(
+  config,
+  { subject, categoryId, modifiedFrom, modifiedTo, pageSize = 30 } = {},
+  fetchImpl = fetch,
+  timestamp = Date.now(),
+) {
+  const normalizedSubject = String(subject || '').trim();
+  const normalizedCategoryId = String(categoryId || '').trim();
+  const normalizedPageSize = Number(pageSize);
+  if (!normalizedSubject || !normalizedCategoryId) throw new Error('商品查询缺少标题或类目');
+  if (!Number.isInteger(normalizedPageSize) || normalizedPageSize < 1 || normalizedPageSize > 30) {
+    throw new Error('商品查询每页数量必须是 1 到 30');
+  }
+  const body = await callAlibabaApi(config, 'alibaba.icbu.product.list', {
+    subject: normalizedSubject,
+    category_id: normalizedCategoryId,
+    language: 'ENGLISH',
+    gmt_modified_from: String(modifiedFrom || '').trim(),
+    gmt_modified_to: String(modifiedTo || '').trim(),
+    current_page: 1,
+    page_size: normalizedPageSize,
+  }, fetchImpl, timestamp);
+  const response = body.alibaba_icbu_product_list_response || body;
+  const products = Array.isArray(response.products)
+    ? response.products
+    : Array.isArray(response.result?.products) ? response.result.products : [];
+  return {
+    products: products.map((product) => ({
+      productId: String(product.product_id ?? product.id ?? '').trim(),
+      subject: String(product.subject || ''),
+      categoryId: String(product.category_id || ''),
+      status: String(product.status || ''),
+      display: String(product.display || ''),
+      modifiedAt: String(product.gmt_modified || ''),
+    })).filter((product) => /^\d+$/.test(product.productId)),
+    requestId: body.request_id || response.request_id || '',
+  };
+}
+
 export { DEFAULT_GATEWAY };
