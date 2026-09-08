@@ -49,6 +49,13 @@ function safeItem(item = {}) {
     errorCode: item.errorCode,
     errorMessage: item.errorMessage,
     completedAt: item.completedAt,
+    baselineProductIds: Array.isArray(item.baselineProductIds) ? item.baselineProductIds.map(String) : undefined,
+    expectedImageIds: Array.isArray(item.expectedImageIds) ? item.expectedImageIds.map(String) : undefined,
+    publicationProductId: item.publicationProductId,
+    candidateProductIds: Array.isArray(item.candidateProductIds) ? item.candidateProductIds.map(String) : undefined,
+    publicationStartedAt: item.publicationStartedAt,
+    nextCheckAt: item.nextCheckAt,
+    verifiedAt: item.verifiedAt,
   }).filter(([, value]) => value !== undefined && value !== ''));
 }
 
@@ -120,19 +127,62 @@ export async function listObsidianDrafts(rootDir) {
     .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
 }
 
+export async function listObsidianPublications(rootDir) {
+  const directory = path.join(path.resolve(rootDir), 'data', 'tasks');
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+  const tasks = await Promise.all(names
+    .filter((name) => /^obsidian-[A-Za-z0-9_-]+\.json$/.test(name))
+    .map(async (name) => JSON.parse(await readFile(path.join(directory, name), 'utf8'))));
+  const formalStatuses = new Set([
+    'publishing', 'reconciling', 'published_verified', 'publish_rejected',
+    'reconciliation_ambiguous', 'reconciliation_unresolved',
+  ]);
+  return tasks.flatMap((task) => (Array.isArray(task.items) ? task.items : [])
+    .filter((item) => formalStatuses.has(item.status))
+    .map((item) => Object.fromEntries(Object.entries({
+      taskId: String(task.id || ''),
+      batchId: String(task.batchId || ''),
+      relativePath: String(task.relativePath || ''),
+      basePlanId: String(task.basePlanId || ''),
+      sourceProductId: String(task.sourceProductId || ''),
+      planId: String(item.planId || ''),
+      status: String(item.status || ''),
+      baselineProductIds: item.baselineProductIds,
+      expectedImageIds: item.expectedImageIds,
+      publicationProductId: item.publicationProductId,
+      candidateProductIds: item.candidateProductIds,
+      publicationStartedAt: item.publicationStartedAt,
+      nextCheckAt: item.nextCheckAt,
+      traceId: item.traceId,
+      requestId: item.requestId,
+      errorCode: item.errorCode,
+      errorMessage: item.errorMessage,
+      verifiedAt: item.verifiedAt,
+      completedAt: item.completedAt,
+    }).filter(([, value]) => value !== undefined && value !== ''))))
+    .sort((left, right) => String(right.publicationStartedAt || '').localeCompare(String(left.publicationStartedAt || '')));
+}
+
 export async function listCompletedObsidianPlanIds(rootDir, identity = {}) {
   const relativePath = String(identity.relativePath || '');
   const basePlanId = String(identity.basePlanId || '');
   const sourceProductId = String(identity.sourceProductId || '');
   if (!relativePath || !basePlanId || !sourceProductId) return [];
-  const drafts = await listObsidianDrafts(rootDir);
-  return [...new Set(drafts
-    .filter((draft) => (
-      draft.relativePath === relativePath
-      && draft.basePlanId === basePlanId
-      && draft.sourceProductId === sourceProductId
+  const completed = [...await listObsidianDrafts(rootDir), ...(await listObsidianPublications(rootDir))
+    .filter((item) => item.status === 'published_verified')];
+  return [...new Set(completed
+    .filter((item) => (
+      item.relativePath === relativePath
+      && item.basePlanId === basePlanId
+      && item.sourceProductId === sourceProductId
     ))
-    .map((draft) => draft.planId))];
+    .map((item) => item.planId))];
 }
 
 export async function updateObsidianDraftItem(rootDir, id, planId, nextItem, expectedVersion) {

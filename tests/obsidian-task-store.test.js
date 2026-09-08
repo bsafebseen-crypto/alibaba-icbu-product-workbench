@@ -8,6 +8,7 @@ import {
   createObsidianPublishingTask,
   listCompletedObsidianPlanIds,
   listObsidianDrafts,
+  listObsidianPublications,
   readObsidianPublishingTask,
   updateObsidianDraftItem,
 } from '../src/obsidian-task-store.js';
@@ -105,4 +106,44 @@ test('listObsidianDrafts returns only safe completed draft metadata newest first
     basePlanId: 'plan-2',
     sourceProductId: '1601933369105',
   }), []);
+});
+
+test('formal publication state persists only safe reconciliation metadata', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-publication-list-'));
+  await createObsidianPublishingTask(root, {
+    batchId: 'batch-3',
+    relativePath: 'vest.md',
+    basePlanId: 'plan-1',
+    sourceProductId: '1601',
+    items: [{
+      planId: 'plan-2', fingerprint: 'hash', status: 'reconciling',
+      baselineProductIds: ['100', '101'], expectedImageIds: ['1', '2', '3', '4', '5', '6'],
+      publicationProductId: '200', candidateProductIds: ['200'], publicationStartedAt: 'start',
+      nextCheckAt: 'next', traceId: 'trace', requestId: 'request', schemaXml: '<secret />',
+    }],
+  }, 'publication-task');
+
+  const storedText = await readFile(path.join(root, 'data', 'tasks', 'obsidian-publication-task.json'), 'utf8');
+  assert.equal(storedText.includes('<secret'), false);
+  assert.deepEqual(await listObsidianPublications(root), [{
+    taskId: 'publication-task', batchId: 'batch-3', relativePath: 'vest.md',
+    basePlanId: 'plan-1', sourceProductId: '1601', planId: 'plan-2', status: 'reconciling',
+    baselineProductIds: ['100', '101'], expectedImageIds: ['1', '2', '3', '4', '5', '6'],
+    publicationProductId: '200', candidateProductIds: ['200'], publicationStartedAt: 'start',
+    nextCheckAt: 'next', traceId: 'trace', requestId: 'request',
+  }]);
+});
+
+test('verified formal products count as completed Obsidian plans', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-publication-complete-'));
+  await createObsidianPublishingTask(root, {
+    relativePath: 'vest.md', basePlanId: 'plan-1', sourceProductId: '1601',
+    items: [{
+      planId: 'plan-3', fingerprint: 'hash', status: 'published_verified',
+      publicationProductId: '300', verifiedAt: 'verified',
+    }],
+  }, 'verified-task');
+  assert.deepEqual(await listCompletedObsidianPlanIds(root, {
+    relativePath: 'vest.md', basePlanId: 'plan-1', sourceProductId: '1601',
+  }), ['plan-3']);
 });
