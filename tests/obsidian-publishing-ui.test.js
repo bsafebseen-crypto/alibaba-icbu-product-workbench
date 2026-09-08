@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildPreviewRequest,
+  buildPublicationRequest,
   beginDraftSubmission,
   buildSharedImageAssignments,
   canGenerateCompletePreviews,
@@ -11,6 +12,7 @@ import {
   formatBatchLoadStatus,
   formatDraftVerification,
   formatPreviewSuccess,
+  formatPublicationStatus,
   finishDraftSubmission,
   imageFileKey,
   imageContentKey,
@@ -80,6 +82,7 @@ test('createObsidianPublishingState starts without persisted product data', () =
     draftItems: {},
     draftSubmissionPlanId: '',
     savedDrafts: [],
+    savedPublications: [],
     loading: false,
     error: '',
   });
@@ -95,6 +98,32 @@ test('draft submission state locks every plan until the active request finishes'
   assert.equal(state.draftSubmissionPlanId, 'plan-2');
   finishDraftSubmission(state, 'plan-2');
   assert.equal(state.draftSubmissionPlanId, '');
+});
+
+test('one product-write lock serializes draft and formal publication controls', () => {
+  const state = createObsidianPublishingState();
+  assert.equal(beginDraftSubmission(state, 'plan-2'), true);
+  assert.equal(beginDraftSubmission(state, 'plan-3'), false);
+  finishDraftSubmission(state, 'plan-2');
+  assert.equal(beginDraftSubmission(state, 'plan-3'), true);
+});
+
+test('formal publication request targets exactly one current preview without confirmation data', () => {
+  const state = createObsidianPublishingState();
+  state.sessionId = 'session-1';
+  state.previews = [{ planId: 'plan-2', fingerprint: 'hash-2' }];
+  assert.deepEqual(buildPublicationRequest(state, 'plan-2', { appKey: 'key' }), {
+    config: { appKey: 'key' }, sessionId: 'session-1', planId: 'plan-2', fingerprint: 'hash-2',
+  });
+  assert.throws(() => buildPublicationRequest(state, 'plan-3', {}), /完整预览/);
+});
+
+test('formal publication statuses clearly prohibit uncertain retries', () => {
+  assert.equal(formatPublicationStatus({ status: 'published_verified', publicationProductId: '200' }), '正式发布已核验 · 商品 ID 200');
+  assert.equal(formatPublicationStatus({ status: 'reconciling' }), '正在自动核验发布结果，禁止重复提交');
+  assert.equal(formatPublicationStatus({ status: 'reconciliation_ambiguous' }), '正在自动辨认发布结果，禁止重复提交');
+  assert.equal(formatPublicationStatus({ status: 'reconciliation_unresolved' }), '自动核验未能唯一确认，已禁止重复发布');
+  assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: 'bad field' }), '阿里明确拒绝：bad field');
 });
 
 test('preferredBatchPath automatically selects the newest valid Markdown batch', () => {

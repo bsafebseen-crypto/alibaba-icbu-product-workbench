@@ -673,6 +673,7 @@ function saveAlibabaProfile() {
   setStatus(elements['ali-status'], elements['ali-remember'].checked
     ? '阿里配置已保存在这台电脑的浏览器中。'
     : 'App Key 和网关已保存；Secret 与 Token 仅保留到关闭浏览器。', 'success');
+  window.dispatchEvent(new Event('alibaba-config-updated'));
 }
 
 function getAlibabaAuthorizationCode(value) {
@@ -1433,6 +1434,7 @@ elements['ali-test'].addEventListener('click', async () => {
     elements['ali-active-state'].textContent = result.ok ? '已连接' : '验证失败';
     const trace = result.traceId ? ` · Trace ${result.traceId}` : '';
     setStatus(elements['ali-status'], `${result.message}${trace}`, result.ok ? 'success' : 'error');
+    if (result.ok) window.dispatchEvent(new Event('alibaba-config-updated'));
   } catch (error) {
     elements['ali-active-state'].textContent = '验证失败';
     setStatus(elements['ali-status'], error.message, 'error');

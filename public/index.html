@@ -262,8 +262,8 @@
           <span class="active"><b>1</b><i>读取批次</i></span>
           <span><b>2</b><i>选择母商品</i></span>
           <span><b>3</b><i>图片与预览</i></span>
-          <span><b>4</b><i>逐个草稿</i></span>
-          <span><b>5</b><i>可信发布</i></span>
+          <span><b>4</b><i>逐个草稿或发布</i></span>
+          <span><b>5</b><i>自动核验</i></span>
         </div>
 
         <section class="console-panel obsidian-panel">
@@ -318,12 +318,12 @@
             <button class="button quiet" id="obsidian-upload-images" type="button" disabled>确认上传所选图片</button>
             <button class="button primary" id="obsidian-generate-previews" type="button" disabled>生成四份完整预览</button>
           </div>
-          <p>操作顺序：只读加载正式母商品 → 图片银行就绪 → 首次确认卖点字段 → 生成完整预览 → 在每张方案卡上点击“确认并创建此商品草稿”。</p>
+          <p>操作顺序：只读加载正式母商品 → 图片银行就绪 → 首次确认卖点字段 → 生成完整预览 → 在每张方案卡上选择创建草稿，或一键正式发布当前这一件。</p>
         </section>
 
         <section class="console-panel obsidian-panel">
-          <div class="panel-band red"><strong>4. 商品草稿与只读核对</strong><span>创建需确认 · 核对不写入</span></div>
-          <p class="obsidian-draft-status" id="obsidian-draft-status" role="status">完整预览通过后，每张方案卡上的“确认并创建此商品草稿”会启用；点击并确认后写入阿里国际站草稿箱。工作台不会正式发布商品。</p>
+          <div class="panel-band red"><strong>4. 商品草稿、正式发布与只读核对</strong><span>每次只处理当前一件</span></div>
+          <p class="obsidian-draft-status" id="obsidian-draft-status" role="status">完整预览通过后，每张方案卡可选择创建草稿，或点击一次“直接正式发布此产品”。正式发布后会自动只读核验，结果不明确时禁止重复提交。</p>
           <div class="obsidian-saved-drafts" id="obsidian-saved-drafts"><p>正在读取本机草稿记录…</p></div>
         </section>
       </section>
@@ -387,7 +387,7 @@
           <div>
             <p class="kicker">ALIBABA OPEN PLATFORM</p>
             <h1 id="alibaba-title">阿里接口</h1>
-            <p>连接国际站开放平台。图片只在你明确确认后上传；商品不会自动创建、修改或发布。</p>
+            <p>连接国际站开放平台。图片只在你明确确认后上传；正式商品仅在方案卡上点击“一键正式发布”时创建。</p>
           </div>
           <div class="header-status"><span>连接状态</span><strong id="ali-active-state">尚未验证</strong></div>
         </header>
@@ -400,8 +400,9 @@
               <div class="api-scope-list">
                 <span>已接入接口</span>
                 <code>schema.get / schema.render</code>
+                <code>product.list / product.get / schema.add</code>
                 <code>photobank.upload</code>
-                <small>Schema 接口只读；图片上传必须在自动上品页逐次确认，仍不会产生商品草稿。</small>
+                <small>正式发布仅允许从已确认的完整预览逐商品触发；响应异常时只读核验，不会自动重发。</small>
             </div>
           </div>
           <div class="settings-form">

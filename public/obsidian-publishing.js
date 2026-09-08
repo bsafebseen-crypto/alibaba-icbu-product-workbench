@@ -24,6 +24,7 @@ export function createObsidianPublishingState() {
     draftItems: {},
     draftSubmissionPlanId: '',
     savedDrafts: [],
+    savedPublications: [],
     loading: false,
     error: '',
   };
@@ -124,6 +125,29 @@ export function finishDraftSubmission(state, planId) {
   if (state.draftSubmissionPlanId === String(planId || '')) {
     state.draftSubmissionPlanId = '';
   }
+}
+
+export function buildPublicationRequest(state, planId, config) {
+  const preview = state.previews.find((candidate) => candidate.planId === planId);
+  if (!preview || !state.sessionId) throw new Error('当前方案没有可正式发布的完整预览');
+  return {
+    config,
+    sessionId: state.sessionId,
+    planId,
+    fingerprint: preview.fingerprint,
+  };
+}
+
+export function formatPublicationStatus(item = {}) {
+  if (item.status === 'published_verified') {
+    return `正式发布已核验 · 商品 ID ${item.publicationProductId}`;
+  }
+  if (item.status === 'reconciling') return '正在自动核验发布结果，禁止重复提交';
+  if (item.status === 'reconciliation_ambiguous') return '正在自动辨认发布结果，禁止重复提交';
+  if (item.status === 'reconciliation_unresolved') return '自动核验未能唯一确认，已禁止重复发布';
+  if (item.status === 'publish_rejected') return `阿里明确拒绝：${item.errorMessage || '请查看接口提示'}`;
+  if (item.status === 'publishing') return '正在正式发布，禁止重复提交';
+  return '';
 }
 
 export function remainingPlans(batch, basePlanId) {
@@ -470,6 +494,13 @@ export function initObsidianPublishing({
         draftButton.textContent = replacing ? '确认并创建修正版草稿' : '确认并创建此商品草稿';
         draftButton.disabled = true;
         card.append(draftButton);
+        const publicationButton = documentRef.createElement('button');
+        publicationButton.className = 'button danger obsidian-publication-button';
+        publicationButton.type = 'button';
+        publicationButton.dataset.planId = variant.id;
+        publicationButton.textContent = '直接正式发布此产品';
+        publicationButton.disabled = true;
+        card.append(publicationButton);
       } else {
         const replacementButton = documentRef.createElement('button');
         replacementButton.className = 'button quiet obsidian-replace-draft-button';
@@ -492,16 +523,68 @@ export function initObsidianPublishing({
   }
 
   function syncDraftSubmissionControls() {
-    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((button) => {
+    elements.variants.querySelectorAll('.obsidian-draft-button, .obsidian-publication-button').forEach((button) => {
       const item = state.draftItems[button.dataset.planId];
       button.disabled = Boolean(state.draftSubmissionPlanId) || item?.status !== 'preview_ready';
     });
   }
 
+  function applyPublicationItemToCard(item) {
+    if (!item?.planId) return;
+    state.draftItems[item.planId] = item;
+    const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(item.planId)}"]`);
+    const button = card?.querySelector('.obsidian-publication-button');
+    const message = formatPublicationStatus(item);
+    if (button && message) {
+      button.textContent = message;
+      button.disabled = item.status !== 'preview_ready';
+    }
+    if (message) text(card?.querySelector('.obsidian-variant-status'), message);
+  }
+
+  const reconciliationTimers = new Map();
+
+  function schedulePublicationReconciliation(record) {
+    if (!record?.taskId || !record?.planId
+      || !['reconciling', 'reconciliation_ambiguous'].includes(record.status)) return;
+    const prior = reconciliationTimers.get(`${record.taskId}:${record.planId}`);
+    if (prior) windowRef.clearTimeout(prior);
+    const delay = Math.max(0, Date.parse(record.nextCheckAt || '') - Date.now()) || 1000;
+    const timer = windowRef.setTimeout(async () => {
+      try {
+        const result = await requestJson('/api/obsidian/publication/reconcile', {
+          method: 'POST',
+          body: JSON.stringify({
+            config: getAlibabaConfig(), taskId: record.taskId, planId: record.planId,
+          }),
+        });
+        applyPublicationItemToCard(result.item);
+        schedulePublicationReconciliation({ ...result.item, taskId: result.taskId });
+        text(elements.draftStatus, formatPublicationStatus(result.item));
+      } catch (error) {
+        text(elements.draftStatus, `自动核验暂未完成：${error.message}`);
+      }
+    }, delay);
+    reconciliationTimers.set(`${record.taskId}:${record.planId}`, timer);
+  }
+
+  async function refreshPublications() {
+    try {
+      const result = await requestJson('/api/obsidian/publications');
+      state.savedPublications = result.publications || [];
+      for (const record of state.savedPublications) {
+        applyPublicationItemToCard(record);
+        schedulePublicationReconciliation(record);
+      }
+    } catch (error) {
+      text(elements.draftStatus, `读取正式发布记录失败：${error.message}`);
+    }
+  }
+
   function invalidateSharedImagePreview(message = '共享图片已经变化，请重新生成完整预览。') {
     invalidatePreviewState(state);
     elements.generatePreviews.disabled = true;
-    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((button) => {
+    elements.variants.querySelectorAll('.obsidian-draft-button, .obsidian-publication-button').forEach((button) => {
       button.disabled = true;
       button.textContent = '请重新生成完整预览';
     });
@@ -920,6 +1003,11 @@ export function initObsidianPublishing({
           button.disabled = false;
           button.textContent = '确认并创建此商品草稿';
         }
+        const publicationButton = card?.querySelector('.obsidian-publication-button');
+        if (publicationButton) {
+          publicationButton.disabled = false;
+          publicationButton.textContent = '直接正式发布此产品';
+        }
       }
       setPreviewStatus(formatPreviewSuccess(state.previews.length), 'success');
       text(elements.draftStatus, '草稿测试已就绪。请逐个核对方案卡，然后单独点击并确认。');
@@ -939,6 +1027,34 @@ export function initObsidianPublishing({
       renderSharedAssignments();
       elements.generatePreviews.disabled = true;
       text(elements.draftStatus, `${planId} 将创建修正版；原草稿 ${state.replacementDraftIds[planId]} 会保留。`);
+      return;
+    }
+    const publicationButton = event.target.closest('.obsidian-publication-button');
+    if (publicationButton) {
+      const planId = publicationButton.dataset.planId;
+      if (!beginDraftSubmission(state, planId)) return;
+      syncDraftSubmissionControls();
+      publicationButton.textContent = '正在正式发布并自动核验…';
+      text(elements.draftStatus, `${planId} 正在正式发布；完成前所有商品写入均已锁定。`);
+      try {
+        const result = await requestJson('/api/obsidian/publication', {
+          method: 'POST',
+          body: JSON.stringify(buildPublicationRequest(state, planId, getAlibabaConfig())),
+        });
+        applyPublicationItemToCard(result.item);
+        schedulePublicationReconciliation({ ...result.item, taskId: result.taskId });
+        text(elements.draftStatus, formatPublicationStatus(result.item),
+          result.item.status === 'published_verified' ? 'success' : '');
+      } catch (error) {
+        if (error.item) applyPublicationItemToCard(error.item);
+        publicationButton.textContent = error.item
+          ? formatPublicationStatus(error.item)
+          : '正式发布失败 · 查看提示';
+        text(elements.draftStatus, error.message);
+      } finally {
+        finishDraftSubmission(state, planId);
+        syncDraftSubmissionControls();
+      }
       return;
     }
     const button = event.target.closest('.obsidian-draft-button');
@@ -1026,6 +1142,8 @@ export function initObsidianPublishing({
   renderPlans();
   loadFixedImages();
   refreshSavedDrafts();
+  refreshPublications();
+  windowRef.addEventListener?.('alibaba-config-updated', refreshPublications);
   void refreshBatches({ autoLoad: true });
   return { state, refreshBatches };
 }

@@ -489,6 +489,8 @@ body::before { display: none; }
 .obsidian-variant-card details { margin-top: 10px; }
 .obsidian-variant-card details p { white-space: pre-wrap; }
 .obsidian-draft-button { width: 100%; margin-top: 12px; border-color: #e1a59c; color: #92372c; background: #fff7f5; }
+.obsidian-publication-button { width: 100%; margin-top: 8px; border-color: #b7352b; color: white; background: #b7352b; }
+.obsidian-publication-button:hover:not(:disabled) { background: #92281f; }
 .obsidian-preview-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 0 18px 18px; }
 .obsidian-preview-actions p { flex: 1; margin: 0; color: var(--muted); font-size: 9px; }
 .obsidian-preview-actions p[data-kind="success"] { color: #19725a; }
