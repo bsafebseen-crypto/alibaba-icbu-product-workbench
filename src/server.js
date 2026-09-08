@@ -10,12 +10,14 @@ import {
   testAiConnection as defaultTestAiConnection,
 } from './ai-client.js';
 import {
+  createAlibabaProduct as defaultCreateAlibabaProduct,
   createAlibabaProductDraft as defaultCreateAlibabaProductDraft,
   exchangeAlibabaCode as defaultExchangeAlibabaCode,
   getAlibabaPublishingCapability as defaultGetAlibabaPublishingCapability,
   loadAlibabaProductDraft as defaultLoadAlibabaProductDraft,
   loadAlibabaProductContext as defaultLoadAlibabaProductContext,
   loadAlibabaProductTemplate as defaultLoadAlibabaProductTemplate,
+  listAlibabaProducts as defaultListAlibabaProducts,
   refreshAlibabaToken as defaultRefreshAlibabaToken,
   testAlibabaConnection as defaultTestAlibabaConnection,
   uploadAlibabaPhoto as defaultUploadAlibabaPhoto,
@@ -35,16 +37,27 @@ import {
   createObsidianPublishingTask as defaultCreateObsidianPublishingTask,
   listCompletedObsidianPlanIds as defaultListCompletedObsidianPlanIds,
   listObsidianDrafts as defaultListObsidianDrafts,
+  listObsidianPublications as defaultListObsidianPublications,
   readObsidianPublishingTask as defaultReadObsidianPublishingTask,
   updateObsidianDraftItem as defaultUpdateObsidianDraftItem,
 } from './obsidian-task-store.js';
-import { compareDraftToPlan } from './draft-verification.js';
+import { compareDraftToPlan, comparePublishedProductToPlan } from './draft-verification.js';
 import {
+  beginPublicationAttempt,
   beginDraftAttempt,
   failDraftAttempt,
   finishDraftAttempt,
+  finishPublicationVerification,
   markDraftResultUnknown,
+  markPublicationAmbiguous,
+  markPublicationReconciling,
+  markPublicationUnresolved,
+  rejectPublicationAttempt,
 } from './publishing-state.js';
+import {
+  reconcilePublication as defaultReconcilePublication,
+  reconciliationDelayMs,
+} from './publication-reconciliation.js';
 import {
   analyzeProductSchema as defaultAnalyzeProductSchema,
   createProductPreview as defaultCreateProductPreview,
@@ -180,11 +193,14 @@ export function createServer(options = {}) {
   const createObsidianVariants = options.createObsidianVariants ?? defaultCreateObsidianVariants;
   const createStrictProductPreview = options.createStrictProductPreview ?? defaultCreateStrictProductPreview;
   const createAlibabaProductDraft = options.createAlibabaProductDraft ?? defaultCreateAlibabaProductDraft;
+  const createAlibabaProduct = options.createAlibabaProduct ?? defaultCreateAlibabaProduct;
+  const listAlibabaProducts = options.listAlibabaProducts ?? defaultListAlibabaProducts;
   const getAlibabaPublishingCapability = options.getAlibabaPublishingCapability ?? defaultGetAlibabaPublishingCapability;
   const createObsidianPublishingTask = options.createObsidianPublishingTask ?? defaultCreateObsidianPublishingTask;
   const listCompletedObsidianPlanIds = options.listCompletedObsidianPlanIds
     ?? defaultListCompletedObsidianPlanIds;
   const listObsidianDrafts = options.listObsidianDrafts ?? defaultListObsidianDrafts;
+  const listObsidianPublications = options.listObsidianPublications ?? defaultListObsidianPublications;
   const readObsidianPublishingTask = options.readObsidianPublishingTask ?? defaultReadObsidianPublishingTask;
   const updateObsidianDraftItem = options.updateObsidianDraftItem ?? defaultUpdateObsidianDraftItem;
   const readSellingPointBinding = options.readSellingPointBinding ?? defaultReadSellingPointBinding;
@@ -198,7 +214,84 @@ export function createServer(options = {}) {
   const readFixedImageConfig = options.readFixedImageConfig ?? defaultReadFixedImageConfig;
   const saveFixedImageConfig = options.saveFixedImageConfig ?? defaultSaveFixedImageConfig;
   const loadFixedImageForUpload = options.loadFixedImageForUpload ?? defaultLoadFixedImageForUpload;
+  const reconcilePublication = options.reconcilePublication ?? defaultReconcilePublication;
+  const nowMs = options.nowMs ?? Date.now;
   const previewSessions = new Map();
+  let productWriteLock = null;
+
+  function nowIso() {
+    return new Date(nowMs()).toISOString();
+  }
+
+  function acquireProductWrite(kind, taskId, planId) {
+    const now = nowMs();
+    if (productWriteLock && (productWriteLock.active || productWriteLock.releaseAt > now)) {
+      const message = kind === 'draft'
+        ? '另一份草稿正在创建并核验，请等待完成'
+        : '另一件商品正在写入或处于 3 秒安全间隔，请稍后再点';
+      throw Object.assign(new Error(message), { status: 409 });
+    }
+    productWriteLock = { kind, taskId, planId, active: true, releaseAt: Number.POSITIVE_INFINITY };
+  }
+
+  function releaseProductWrite() {
+    if (!productWriteLock) return;
+    productWriteLock.active = false;
+    productWriteLock.releaseAt = nowMs() + 3000;
+  }
+
+  async function reconcileStoredPublication(config, taskId, planId) {
+    let task = await readObsidianPublishingTask(rootDir, taskId);
+    const item = task.items.find((candidate) => candidate.planId === planId);
+    if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+    if (!['reconciling', 'reconciliation_ambiguous'].includes(item.status)) {
+      throw Object.assign(new Error('这个方案当前不需要发布对账'), { status: 409 });
+    }
+    const batch = await readObsidianBatch(obsidianRoot, task.relativePath);
+    const plan = batch.plans.find((candidate) => candidate.id === planId);
+    if (!plan) throw Object.assign(new Error('Obsidian 批次中不存在这个方案'), { status: 400 });
+    const elapsedMs = Math.max(0, nowMs() - Date.parse(item.publicationStartedAt || nowIso()));
+    const attemptNumber = Number(item.reconciliationAttempts || 0);
+    const delay = reconciliationDelayMs(attemptNumber, elapsedMs);
+    if (delay === null) {
+      const unresolved = markPublicationUnresolved(item, {
+        candidateProductIds: item.candidateProductIds || [], completedAt: nowIso(),
+      });
+      task = await updateObsidianDraftItem(rootDir, taskId, planId, unresolved, task.version);
+      return { task, item: unresolved };
+    }
+    const result = await reconcilePublication({
+      listAlibabaProducts,
+      loadAlibabaProductContext,
+      analyzeProductSchema,
+      comparePublishedProductToPlan,
+    }, {
+      config, plan, item,
+      categoryId: task.context?.categoryId,
+      sellingPointBinding: task.sellingPointBinding,
+      now: nowIso(),
+    });
+    let nextItem;
+    if (result.kind === 'verified') {
+      nextItem = finishPublicationVerification(item, {
+        productId: result.productId, traceId: result.traceId, verifiedAt: nowIso(),
+      });
+    } else if (result.kind === 'ambiguous') {
+      nextItem = markPublicationAmbiguous(item, {
+        candidateProductIds: result.candidateProductIds,
+        nextCheckAt: new Date(nowMs() + delay).toISOString(),
+      });
+      nextItem.reconciliationAttempts = attemptNumber + 1;
+    } else {
+      nextItem = markPublicationReconciling(item, {
+        candidateProductIds: result.candidateProductIds,
+        nextCheckAt: new Date(nowMs() + delay).toISOString(),
+      });
+      nextItem.reconciliationAttempts = attemptNumber + 1;
+    }
+    task = await updateObsidianDraftItem(rootDir, taskId, planId, nextItem, task.version);
+    return { task, item: nextItem };
+  }
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
@@ -438,6 +531,7 @@ export function createServer(options = {}) {
               planId: preview.planId,
               fingerprint: preview.fingerprint,
               status: 'preview_ready',
+              expectedImageIds: body.imagesByPlan[preview.planId].map((image) => String(image.fileId)),
               ...(replacementByPlan[preview.planId]
                 ? { replacesDraftProductId: replacementByPlan[preview.planId] }
                 : {}),
@@ -469,6 +563,123 @@ export function createServer(options = {}) {
 
       if (request.method === 'GET' && url.pathname === '/api/obsidian/drafts') {
         sendJson(response, 200, { drafts: await listObsidianDrafts(rootDir) });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/obsidian/publications') {
+        sendJson(response, 200, { publications: await listObsidianPublications(rootDir) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/publication/reconcile') {
+        const body = await readJson(request);
+        const result = await reconcileStoredPublication(
+          body.config,
+          String(body.taskId || ''),
+          String(body.planId || ''),
+        );
+        sendJson(response, 200, {
+          taskId: result.task.id,
+          taskVersion: result.task.version,
+          item: result.item,
+        });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/publication') {
+        const body = await readJson(request);
+        const session = previewSessions.get(String(body.sessionId || ''));
+        if (!session) throw Object.assign(new Error('预览会话已失效，请重新生成完整预览'), { status: 409 });
+        const planId = String(body.planId || '');
+        const preview = session.previews.get(planId);
+        if (!preview) throw Object.assign(new Error('预览会话中不存在这个方案'), { status: 400 });
+        acquireProductWrite('publication', session.taskId, planId);
+        try {
+          let task = await readObsidianPublishingTask(rootDir, session.taskId);
+          const item = task.items.find((candidate) => candidate.planId === planId);
+          if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+          if (item.status !== 'preview_ready') {
+            throw Object.assign(new Error('当前状态不允许直接发布'), { status: 409 });
+          }
+          if (body.fingerprint !== preview.fingerprint || item.fingerprint !== preview.fingerprint) {
+            throw Object.assign(new Error('预览已经变化，请重新生成并确认'), { status: 409 });
+          }
+          const currentStoredBinding = await readSellingPointBinding(rootDir, session.context);
+          const currentBinding = currentStoredBinding
+            ? validateSellingPointBinding(session.schemaXml, currentStoredBinding)
+            : null;
+          if (!currentBinding
+            || currentBinding.fieldId !== session.sellingPointBinding.fieldId
+            || currentBinding.structureType !== session.sellingPointBinding.structureType
+            || JSON.stringify(currentBinding.carrierPath) !== JSON.stringify(session.sellingPointBinding.carrierPath)) {
+            throw Object.assign(new Error('卖点字段绑定已经变化，请重新校准并生成完整预览'), { status: 409 });
+          }
+          const capability = await getAlibabaPublishingCapability(body.config, {
+            categoryId: session.context.categoryId,
+            language: session.context.language,
+          });
+          const sourceType = String(session.context.sourceProductType || '').toLocaleLowerCase();
+          const allowed = sourceType === 'sourcing'
+            ? capability.supportPostSourcing
+            : capability.supportPostWholesale;
+          if (!allowed) throw Object.assign(new Error('当前账号没有这个类目和商品类型的发品权限'), { status: 403 });
+
+          const batch = await readObsidianBatch(obsidianRoot, task.relativePath);
+          const plan = batch.plans.find((candidate) => candidate.id === planId);
+          if (!plan) throw Object.assign(new Error('Obsidian 批次中不存在这个方案'), { status: 400 });
+          const baseline = await listAlibabaProducts(body.config, {
+            subject: plan.title,
+            categoryId: session.context.categoryId,
+            modifiedFrom: new Date(nowMs() - 24 * 60 * 60 * 1000).toISOString(),
+            modifiedTo: nowIso(),
+            pageSize: 30,
+          });
+          const publishing = beginPublicationAttempt(item, {
+            fingerprint: body.fingerprint,
+            baselineProductIds: (baseline.products || []).map((product) => product.productId),
+            expectedImageIds: item.expectedImageIds,
+            startedAt: nowIso(),
+          });
+          task = await updateObsidianDraftItem(rootDir, session.taskId, planId, publishing, task.version);
+          try {
+            const created = await createAlibabaProduct(body.config, {
+              schemaXml: preview.previewXml,
+              publishContext: session.context,
+            });
+            const reconciling = markPublicationReconciling(publishing, {
+              productId: created.productId,
+              traceId: created.traceId,
+              requestId: created.requestId,
+              nextCheckAt: nowIso(),
+            });
+            task = await updateObsidianDraftItem(rootDir, session.taskId, planId, reconciling, task.version);
+          } catch (error) {
+            if (error.definitive === true) {
+              const rejected = rejectPublicationAttempt(publishing, error, nowIso());
+              task = await updateObsidianDraftItem(rootDir, session.taskId, planId, rejected, task.version);
+              sendJson(response, 422, {
+                error: rejected.errorMessage,
+                taskId: task.id,
+                taskVersion: task.version,
+                item: rejected,
+              });
+              return;
+            }
+            const reconciling = markPublicationReconciling(publishing, {
+              error,
+              nextCheckAt: nowIso(),
+            });
+            task = await updateObsidianDraftItem(rootDir, session.taskId, planId, reconciling, task.version);
+          }
+          const reconciled = await reconcileStoredPublication(body.config, session.taskId, planId);
+          sendJson(response, reconciled.item.status === 'published_verified' ? 201 : 202, {
+            taskId: reconciled.task.id,
+            taskVersion: reconciled.task.version,
+            item: reconciled.item,
+          });
+        } finally {
+          releaseProductWrite();
+        }
         return;
       }
 
@@ -524,9 +735,7 @@ export function createServer(options = {}) {
         if (!session) throw Object.assign(new Error('预览会话已失效，请重新生成完整预览'), { status: 409 });
         const preview = session.previews.get(String(body.planId || ''));
         if (!preview) throw Object.assign(new Error('预览会话中不存在这个方案'), { status: 400 });
-        if (session.activeDraftPlanId) {
-          throw Object.assign(new Error('另一份草稿正在创建并核验，请等待完成'), { status: 409 });
-        }
+        acquireProductWrite('draft', session.taskId, String(body.planId || ''));
         session.activeDraftPlanId = String(body.planId || '');
 
         try {
@@ -610,6 +819,7 @@ export function createServer(options = {}) {
         }
         } finally {
           session.activeDraftPlanId = '';
+          releaseProductWrite();
         }
         return;
       }

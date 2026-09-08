@@ -1398,3 +1398,130 @@ test('POST /api/obsidian/draft/verify returns Alibaba trace id without raw respo
     },
   });
 });
+
+test('POST /api/obsidian/publication publishes one fingerprint-bound plan and verifies it', async () => {
+  let publishCalls = 0;
+  let storedTaskInput;
+  await withServer(async (baseUrl) => {
+    const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601', sourceProductType: 'sourcing', categoryId: '32905',
+          language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<source />',
+        },
+        sellingPointBinding, imagesByPlan: { 'variant-1': images },
+      }),
+    })).json();
+    assert.deepEqual(storedTaskInput.items[0].expectedImageIds, ['1', '2', '3', '4', '5', '6']);
+
+    const response = await fetch(`${baseUrl}/api/obsidian/publication`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key', appSecret: 'must-not-return', accessToken: 'token' },
+        sessionId: prepared.sessionId, planId: 'variant-1', fingerprint: 'hash-variant-1',
+      }),
+    });
+    const text = await response.text();
+    assert.equal(response.status, 201);
+    assert.doesNotMatch(text, /must-not-return|<preview/);
+    assert.equal(JSON.parse(text).item.status, 'published_verified');
+    assert.equal(JSON.parse(text).item.publicationProductId, '200');
+    assert.equal(publishCalls, 1);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [{ id: 'variant-1', title: 'Exact title' }] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    createObsidianPublishingTask: async (rootDir, input, requestedId) => {
+      storedTaskInput = input;
+      const { createObsidianPublishingTask } = await import('../src/obsidian-task-store.js');
+      return createObsidianPublishingTask(rootDir, input, requestedId);
+    },
+    listAlibabaProducts: async () => ({ products: [{ productId: '100' }] }),
+    createAlibabaProduct: async () => {
+      publishCalls += 1;
+      return { productId: '200', traceId: 'trace-200', requestId: 'request-200' };
+    },
+    reconcilePublication: async (_deps, { item: current }) => {
+      assert.deepEqual(current.baselineProductIds, ['100']);
+      assert.equal(current.publicationProductId, '200');
+      return { kind: 'verified', productId: '200', candidateProductIds: ['200'] };
+    },
+  });
+});
+
+test('lost formal publish response enters read-only reconciliation and is never resubmitted', async () => {
+  let publishCalls = 0;
+  await withServer(async (baseUrl) => {
+    const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: { sourceProductId: '1601', sourceProductType: 'sourcing', categoryId: '32905', language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<source />' },
+        sellingPointBinding, imagesByPlan: { 'variant-1': images },
+      }),
+    })).json();
+    const requestBody = {
+      config: { appKey: 'key' }, sessionId: prepared.sessionId,
+      planId: 'variant-1', fingerprint: 'hash-variant-1',
+    };
+    const response = await fetch(`${baseUrl}/api/obsidian/publication`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody),
+    });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json()).item.status, 'reconciling');
+
+    const duplicate = await fetch(`${baseUrl}/api/obsidian/publication`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody),
+    });
+    assert.equal(duplicate.status, 409);
+    assert.equal(publishCalls, 1);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [{ id: 'variant-1', title: 'Exact title' }] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    listAlibabaProducts: async () => ({ products: [] }),
+    createAlibabaProduct: async () => { publishCalls += 1; throw new Error('timeout'); },
+    reconcilePublication: async () => ({ kind: 'pending', candidateProductIds: [] }),
+  });
+});
+
+test('GET publications and POST reconcile expose safe state and perform no write', async () => {
+  let publishCalls = 0;
+  await withServer(async (baseUrl) => {
+    const list = await fetch(`${baseUrl}/api/obsidian/publications`);
+    assert.deepEqual(await list.json(), { publications: [{ taskId: 'task-1', planId: 'plan-2', status: 'reconciling' }] });
+    const response = await fetch(`${baseUrl}/api/obsidian/publication/reconcile`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appSecret: 'must-not-return' }, taskId: 'task-1', planId: 'plan-2' }),
+    });
+    const text = await response.text();
+    assert.equal(response.status, 200);
+    assert.doesNotMatch(text, /must-not-return/);
+    assert.equal(JSON.parse(text).item.status, 'published_verified');
+    assert.equal(publishCalls, 0);
+  }, {
+    listObsidianPublications: async () => [{ taskId: 'task-1', planId: 'plan-2', status: 'reconciling' }],
+    readObsidianPublishingTask: async () => ({
+      id: 'task-1', version: 1, relativePath: 'batch.md', context: { categoryId: '32905' },
+      sellingPointBinding,
+      items: [{
+        planId: 'plan-2', fingerprint: 'hash', status: 'reconciling',
+        baselineProductIds: [], expectedImageIds: ['1', '2', '3', '4', '5', '6'], publicationStartedAt: new Date().toISOString(),
+      }],
+    }),
+    readObsidianBatch: async () => ({ plans: [{ id: 'plan-2', title: 'Exact title' }] }),
+    updateObsidianDraftItem: async (_root, _taskId, _planId, nextItem) => ({ id: 'task-1', version: 2, items: [nextItem] }),
+    reconcilePublication: async () => ({ kind: 'verified', productId: '200', candidateProductIds: ['200'] }),
+    createAlibabaProduct: async () => { publishCalls += 1; },
+  });
+});

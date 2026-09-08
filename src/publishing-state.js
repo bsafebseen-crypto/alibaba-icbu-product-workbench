@@ -70,7 +70,7 @@ export function beginPublicationAttempt(item, input = {}) {
 }
 
 export function markPublicationReconciling(item, input = {}) {
-  requirePublicationStatus(item, ['publishing', 'reconciliation_ambiguous'], '当前状态不能进入发布对账');
+  requirePublicationStatus(item, ['publishing', 'reconciling', 'reconciliation_ambiguous'], '当前状态不能进入发布对账');
   return Object.fromEntries(Object.entries({
     ...item,
     status: 'reconciling',

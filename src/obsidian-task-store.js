@@ -56,6 +56,7 @@ function safeItem(item = {}) {
     publicationStartedAt: item.publicationStartedAt,
     nextCheckAt: item.nextCheckAt,
     verifiedAt: item.verifiedAt,
+    reconciliationAttempts: item.reconciliationAttempts,
   }).filter(([, value]) => value !== undefined && value !== ''));
 }
 
@@ -165,6 +166,7 @@ export async function listObsidianPublications(rootDir) {
       errorMessage: item.errorMessage,
       verifiedAt: item.verifiedAt,
       completedAt: item.completedAt,
+      reconciliationAttempts: item.reconciliationAttempts,
     }).filter(([, value]) => value !== undefined && value !== ''))))
     .sort((left, right) => String(right.publicationStartedAt || '').localeCompare(String(left.publicationStartedAt || '')));
 }
