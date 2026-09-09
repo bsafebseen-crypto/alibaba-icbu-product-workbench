@@ -1484,6 +1484,46 @@ test('POST /api/obsidian/publication publishes one fingerprint-bound plan after 
   });
 });
 
+test('POST /api/obsidian/publication/preflight performs only read checks for one preview plan', async () => {
+  let publishCalls = 0;
+  let listInput;
+  await withServer(async (baseUrl) => {
+    const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601', sourceProductType: 'sourcing', categoryId: '32905',
+          language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<source />',
+        },
+        sellingPointBinding, imagesByPlan: { 'variant-1': images },
+      }),
+    })).json();
+
+    const response = await fetch(`${baseUrl}/api/obsidian/publication/preflight`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: { appKey: 'key' }, taskId: prepared.taskId, planId: 'variant-1' }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { ok: true, allowed: true, baselineCount: 1, requestId: 'list-request' });
+    assert.equal(listInput.subject, 'Exact title');
+    assert.equal(publishCalls, 0);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [{ id: 'variant-1', title: 'Exact title' }] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    listAlibabaProducts: async (_config, input) => {
+      listInput = input;
+      return { products: [{ productId: '100' }], requestId: 'list-request' };
+    },
+    createAlibabaProduct: async () => { publishCalls += 1; },
+  });
+});
+
 test('lost formal publish response enters read-only reconciliation and is never resubmitted', async () => {
   let publishCalls = 0;
   await withServer(async (baseUrl) => {

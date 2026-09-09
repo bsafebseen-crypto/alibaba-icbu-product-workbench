@@ -14,6 +14,7 @@ import {
   formatBatchLoadStatus,
   formatDraftVerification,
   formatPreviewSuccess,
+  formatAlibabaRequestError,
   formatPublicationStatus,
   finishDraftSubmission,
   imageFileKey,
@@ -143,6 +144,13 @@ test('formal publication statuses clearly prohibit uncertain retries', () => {
   assert.equal(formatPublicationStatus({ status: 'reconciliation_ambiguous' }), '正在自动辨认发布结果，禁止重复提交');
   assert.equal(formatPublicationStatus({ status: 'reconciliation_unresolved' }), '自动核验未能唯一确认，已禁止重复发布');
   assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: 'bad field' }), '阿里明确拒绝：bad field');
+});
+
+test('Alibaba request errors include the failed stage and request id', () => {
+  assert.equal(formatAlibabaRequestError({
+    message: 'Remote service error', stage: 'product-list', code: '15',
+    subCode: 'isp.remote-service-error', requestId: 'req-15',
+  }), 'Remote service error（阶段 product-list；错误 15 / isp.remote-service-error；Request ID req-15）');
 });
 
 test('preferredBatchPath automatically selects the newest valid Markdown batch', () => {

@@ -150,6 +150,14 @@ export function formatPublicationStatus(item = {}) {
   return '';
 }
 
+export function formatAlibabaRequestError(error = {}) {
+  const details = [];
+  if (error.stage) details.push(`阶段 ${error.stage}`);
+  if (error.code || error.subCode) details.push(`错误 ${[error.code, error.subCode].filter(Boolean).join(' / ')}`);
+  if (error.requestId) details.push(`Request ID ${error.requestId}`);
+  return `${error.message || '阿里接口请求失败'}${details.length ? `（${details.join('；')}）` : ''}`;
+}
+
 export function canSubmitPublication(item, writeLocked) {
   return !writeLocked && ['preview_ready', 'draft_created'].includes(item?.status);
 }
@@ -1068,7 +1076,7 @@ export function initObsidianPublishing({
         publicationButton.textContent = error.item
           ? formatPublicationStatus(error.item)
           : '正式发布失败 · 查看提示';
-        text(elements.draftStatus, error.message);
+        text(elements.draftStatus, formatAlibabaRequestError(error));
       } finally {
         finishDraftSubmission(state, planId);
         syncDraftSubmissionControls();

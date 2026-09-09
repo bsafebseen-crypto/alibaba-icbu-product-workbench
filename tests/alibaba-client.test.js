@@ -431,6 +431,26 @@ test('createAlibabaProductDraft marks explicit Alibaba business failures as defi
   );
 });
 
+test('callAlibabaApi preserves Alibaba error metadata on a non-2xx response', async () => {
+  const fetchImpl = async () => ({
+    ok: false,
+    status: 500,
+    async json() {
+      return { error_response: { msg: 'Remote service error', code: '15', sub_code: 'isp.remote-service-error', request_id: 'request-failed' } };
+    },
+  });
+
+  await assert.rejects(
+    () => callAlibabaApi({
+      gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+    }, 'alibaba.icbu.product.list', {}, fetchImpl),
+    (error) => error.message === 'Remote service error'
+      && error.code === '15'
+      && error.subCode === 'isp.remote-service-error'
+      && error.requestId === 'request-failed',
+  );
+});
+
 test('createAlibabaProduct sends the official schema add envelope', async () => {
   let request;
   const fetchImpl = async (url, options) => {
@@ -539,6 +559,28 @@ test('listAlibabaProducts maps schema language and returns safe product summarie
     }],
     requestId: 'list-request',
   });
+});
+
+test('listAlibabaProducts converts ISO timestamps to the Alibaba date-time format', async () => {
+  let requestBody;
+  const fetchImpl = async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      async json() { return { alibaba_icbu_product_list_response: { products: [] } }; },
+    };
+  };
+
+  await listAlibabaProducts({
+    gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+  }, {
+    subject: 'Exact Product Title', categoryId: '301504',
+    modifiedFrom: '2026-09-08T06:00:00.000Z', modifiedTo: '2026-09-09T06:00:00.000Z',
+  }, fetchImpl, 1700000000000);
+
+  assert.equal(requestBody.gmt_modified_from, '2026-09-08 06:00:00');
+  assert.equal(requestBody.gmt_modified_to, '2026-09-09 06:00:00');
 });
 
 test('uploadAlibabaPhoto sends the official multipart TOP request and normalizes the result', async () => {

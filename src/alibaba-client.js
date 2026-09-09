@@ -151,11 +151,14 @@ export async function callAlibabaApi(
     body: JSON.stringify(params),
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body?.error_response?.msg || `阿里接口请求失败（HTTP ${response.status}）`);
-  if (body.error_response) {
-    const error = new Error(body.error_response.msg || body.error_response.sub_msg || '阿里接口返回错误');
-    error.code = body.error_response.code || body.error_response.sub_code;
-    error.requestId = body.error_response.request_id;
+  if (!response.ok || body.error_response) {
+    const details = body.error_response || {};
+    const error = new Error(details.msg || details.sub_msg || (
+      response.ok ? '阿里接口返回错误' : `阿里接口请求失败（HTTP ${response.status}）`
+    ));
+    error.code = details.code || details.sub_code;
+    error.subCode = details.sub_code;
+    error.requestId = details.request_id;
     throw error;
   }
   return body;
@@ -503,6 +506,11 @@ export async function listAlibabaProducts(
   fetchImpl = fetch,
   timestamp = Date.now(),
 ) {
+  const formatDateTime = (value) => {
+    const normalized = String(value || '').trim();
+    const iso = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d{3})?Z$/);
+    return iso ? `${iso[1]} ${iso[2]}` : normalized;
+  };
   const normalizedSubject = String(subject || '').trim();
   const normalizedCategoryId = String(categoryId || '').trim();
   const normalizedPageSize = Number(pageSize);
@@ -514,8 +522,8 @@ export async function listAlibabaProducts(
     subject: normalizedSubject,
     category_id: normalizedCategoryId,
     language: 'ENGLISH',
-    gmt_modified_from: String(modifiedFrom || '').trim(),
-    gmt_modified_to: String(modifiedTo || '').trim(),
+    gmt_modified_from: formatDateTime(modifiedFrom),
+    gmt_modified_to: formatDateTime(modifiedTo),
     current_page: 1,
     page_size: normalizedPageSize,
   }, fetchImpl, timestamp);

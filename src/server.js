@@ -600,6 +600,58 @@ export function createServer(options = {}) {
         return;
       }
 
+      if (request.method === 'POST' && url.pathname === '/api/obsidian/publication/preflight') {
+        const body = await readJson(request);
+        const taskId = String(body.taskId || '');
+        const planId = String(body.planId || '');
+        const task = await readObsidianPublishingTask(rootDir, taskId);
+        const item = task.items.find((candidate) => candidate.planId === planId);
+        if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+        if (!['preview_ready', 'draft_created'].includes(item.status)) {
+          throw Object.assign(new Error('当前状态不允许正式发布预检'), { status: 409 });
+        }
+
+        let capability;
+        try {
+          capability = await getAlibabaPublishingCapability(body.config, {
+            categoryId: task.context.categoryId,
+            language: task.context.language,
+          });
+        } catch (error) {
+          error.stage = 'capability';
+          throw error;
+        }
+        const sourceType = String(task.context.sourceProductType || '').toLocaleLowerCase();
+        const allowed = sourceType === 'sourcing'
+          ? capability.supportPostSourcing
+          : capability.supportPostWholesale;
+        if (!allowed) throw Object.assign(new Error('当前账号没有这个类目和商品类型的发品权限'), { status: 403 });
+
+        const batch = await readObsidianBatch(obsidianRoot, task.relativePath);
+        const plan = batch.plans.find((candidate) => candidate.id === planId);
+        if (!plan) throw Object.assign(new Error('Obsidian 批次中不存在这个方案'), { status: 400 });
+        let baseline;
+        try {
+          baseline = await listAlibabaProducts(body.config, {
+            subject: plan.title,
+            categoryId: task.context.categoryId,
+            modifiedFrom: new Date(nowMs() - 24 * 60 * 60 * 1000).toISOString(),
+            modifiedTo: nowIso(),
+            pageSize: 30,
+          });
+        } catch (error) {
+          error.stage = 'product-list';
+          throw error;
+        }
+        sendJson(response, 200, {
+          ok: true,
+          allowed: true,
+          baselineCount: (baseline.products || []).length,
+          requestId: baseline.requestId || '',
+        });
+        return;
+      }
+
       if (request.method === 'POST' && url.pathname === '/api/obsidian/publication') {
         const body = await readJson(request);
         const session = previewSessions.get(String(body.sessionId || ''));
@@ -628,10 +680,16 @@ export function createServer(options = {}) {
             || JSON.stringify(currentBinding.carrierPath) !== JSON.stringify(session.sellingPointBinding.carrierPath)) {
             throw Object.assign(new Error('卖点字段绑定已经变化，请重新校准并生成完整预览'), { status: 409 });
           }
-          const capability = await getAlibabaPublishingCapability(body.config, {
-            categoryId: session.context.categoryId,
-            language: session.context.language,
-          });
+          let capability;
+          try {
+            capability = await getAlibabaPublishingCapability(body.config, {
+              categoryId: session.context.categoryId,
+              language: session.context.language,
+            });
+          } catch (error) {
+            error.stage = 'capability';
+            throw error;
+          }
           const sourceType = String(session.context.sourceProductType || '').toLocaleLowerCase();
           const allowed = sourceType === 'sourcing'
             ? capability.supportPostSourcing
@@ -641,13 +699,19 @@ export function createServer(options = {}) {
           const batch = await readObsidianBatch(obsidianRoot, task.relativePath);
           const plan = batch.plans.find((candidate) => candidate.id === planId);
           if (!plan) throw Object.assign(new Error('Obsidian 批次中不存在这个方案'), { status: 400 });
-          const baseline = await listAlibabaProducts(body.config, {
-            subject: plan.title,
-            categoryId: session.context.categoryId,
-            modifiedFrom: new Date(nowMs() - 24 * 60 * 60 * 1000).toISOString(),
-            modifiedTo: nowIso(),
-            pageSize: 30,
-          });
+          let baseline;
+          try {
+            baseline = await listAlibabaProducts(body.config, {
+              subject: plan.title,
+              categoryId: session.context.categoryId,
+              modifiedFrom: new Date(nowMs() - 24 * 60 * 60 * 1000).toISOString(),
+              modifiedTo: nowIso(),
+              pageSize: 30,
+            });
+          } catch (error) {
+            error.stage = 'product-list';
+            throw error;
+          }
           const publishing = beginPublicationAttempt(item, {
             fingerprint: body.fingerprint,
             baselineProductIds: (baseline.products || []).map((product) => product.productId),
@@ -997,6 +1061,9 @@ export function createServer(options = {}) {
       sendJson(response, error.status ?? 500, Object.fromEntries(Object.entries({
         error: error.message || '服务器内部错误',
         code: error.code,
+        subCode: error.subCode,
+        requestId: error.requestId,
+        stage: error.stage,
         traceId: error.traceId,
       }).filter(([, value]) => value !== undefined && value !== '')));
     }
