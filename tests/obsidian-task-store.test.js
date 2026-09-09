@@ -108,6 +108,35 @@ test('listObsidianDrafts returns only safe completed draft metadata newest first
   }), []);
 });
 
+test('listObsidianDrafts tolerates a resumed draft without a completed timestamp', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'obsidian-resumed-draft-list-'));
+  await createObsidianPublishingTask(root, {
+    batchId: 'batch-resumed',
+    relativePath: 'batch.md',
+    basePlanId: 'plan-1',
+    sourceProductId: '1601',
+    items: [
+      { planId: 'plan-2', status: 'draft_created', draftProductId: '1602' },
+      {
+        planId: 'plan-3', status: 'draft_created', draftProductId: '1603',
+        completedAt: '2026-09-09T03:00:00.000Z',
+      },
+    ],
+  }, 'resumed-task');
+
+  assert.deepEqual(await listObsidianDrafts(root), [
+    {
+      taskId: 'resumed-task', batchId: 'batch-resumed', relativePath: 'batch.md',
+      basePlanId: 'plan-1', sourceProductId: '1601', planId: 'plan-3', draftProductId: '1603',
+      completedAt: '2026-09-09T03:00:00.000Z',
+    },
+    {
+      taskId: 'resumed-task', batchId: 'batch-resumed', relativePath: 'batch.md',
+      basePlanId: 'plan-1', sourceProductId: '1601', planId: 'plan-2', draftProductId: '1602',
+    },
+  ]);
+});
+
 test('formal publication state persists only safe reconciliation metadata', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'obsidian-publication-list-'));
   await createObsidianPublishingTask(root, {

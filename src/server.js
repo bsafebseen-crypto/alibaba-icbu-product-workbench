@@ -493,7 +493,7 @@ export function createServer(options = {}) {
                 }
                 replacementByPlan[planId] = exactPriorDraft.draftProductId;
               } else {
-                resumedDraftByPlan[planId] = exactPriorDraft.draftProductId;
+                resumedDraftByPlan[planId] = exactPriorDraft;
               }
             }
           }
@@ -538,7 +538,12 @@ export function createServer(options = {}) {
               status: resumedDraftByPlan[preview.planId] ? 'draft_created' : 'preview_ready',
               expectedImageIds: body.imagesByPlan[preview.planId].map((image) => String(image.fileId)),
               ...(resumedDraftByPlan[preview.planId]
-                ? { draftProductId: resumedDraftByPlan[preview.planId] }
+                ? {
+                  draftProductId: resumedDraftByPlan[preview.planId].draftProductId,
+                  ...(resumedDraftByPlan[preview.planId].completedAt
+                    ? { completedAt: resumedDraftByPlan[preview.planId].completedAt }
+                    : {}),
+                }
                 : {}),
               ...(replacementByPlan[preview.planId]
                 ? { replacesDraftProductId: replacementByPlan[preview.planId] }

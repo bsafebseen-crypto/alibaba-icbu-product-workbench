@@ -949,6 +949,7 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
       planId: 'variant-1', fingerprint: 'hash-variant-1', status: 'draft_created',
       expectedImageIds: ['id-1', 'id-2', 'id-3', 'id-4', 'id-5', 'id-6'],
       draftProductId: '1601935213152',
+      completedAt: '2026-09-09T02:00:00.000Z',
     });
   }, {
     readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
@@ -961,7 +962,7 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
     listCompletedObsidianPlanIds: async () => ['variant-1'],
     listObsidianDrafts: async () => [{
       relativePath: 'batch.md', basePlanId: 'base', sourceProductId: '1601933369105',
-      planId: 'variant-1', draftProductId: '1601935213152',
+      planId: 'variant-1', draftProductId: '1601935213152', completedAt: '2026-09-09T02:00:00.000Z',
     }],
     createStrictProductPreview: (_schemaXml, variant) => ({
       fingerprint: `hash-${variant.planId}`, previewXml: '<preview />', changedFields: ['sellingPoints'],

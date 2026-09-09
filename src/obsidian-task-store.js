@@ -125,7 +125,7 @@ export async function listObsidianDrafts(rootDir) {
       replacesDraftProductId: String(item.replacesDraftProductId || ''),
       completedAt: String(item.completedAt || ''),
     }).filter(([, value]) => value !== ''))))
-    .sort((left, right) => right.completedAt.localeCompare(left.completedAt));
+    .sort((left, right) => String(right.completedAt || '').localeCompare(String(left.completedAt || '')));
 }
 
 export async function listObsidianPublications(rootDir) {
