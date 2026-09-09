@@ -79,6 +79,22 @@ test('formal publication binds the exact preview, baseline and six expected imag
   }), /6 张图片/);
 });
 
+test('formal publication can start from a verified preview after its draft was created', () => {
+  const publishing = beginPublicationAttempt({
+    ...readyItem(),
+    status: 'draft_created',
+    draftProductId: '1601946395256',
+  }, {
+    fingerprint: 'hash-1',
+    baselineProductIds: ['100'],
+    expectedImageIds: ['1', '2', '3', '4', '5', '6'],
+    startedAt: 'start',
+  });
+
+  assert.equal(publishing.status, 'publishing');
+  assert.equal(publishing.draftProductId, '1601946395256');
+});
+
 test('formal publication has explicit reconciling, verified, rejected and unresolved states', () => {
   const publishing = beginPublicationAttempt(readyItem(), {
     fingerprint: 'hash-1', baselineProductIds: [], expectedImageIds: ['1', '2', '3', '4', '5', '6'], startedAt: 'start',

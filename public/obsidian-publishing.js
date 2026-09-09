@@ -150,6 +150,10 @@ export function formatPublicationStatus(item = {}) {
   return '';
 }
 
+export function canSubmitPublication(item, writeLocked) {
+  return !writeLocked && ['preview_ready', 'draft_created'].includes(item?.status);
+}
+
 export function remainingPlans(batch, basePlanId) {
   if (!batch?.plans?.some((plan) => plan.id === basePlanId)) {
     throw new Error('请选择批次中的一个母商品方案');
@@ -523,9 +527,13 @@ export function initObsidianPublishing({
   }
 
   function syncDraftSubmissionControls() {
-    elements.variants.querySelectorAll('.obsidian-draft-button, .obsidian-publication-button').forEach((button) => {
+    elements.variants.querySelectorAll('.obsidian-draft-button').forEach((button) => {
       const item = state.draftItems[button.dataset.planId];
       button.disabled = Boolean(state.draftSubmissionPlanId) || item?.status !== 'preview_ready';
+    });
+    elements.variants.querySelectorAll('.obsidian-publication-button').forEach((button) => {
+      const item = state.draftItems[button.dataset.planId];
+      button.disabled = !canSubmitPublication(item, Boolean(state.draftSubmissionPlanId));
     });
   }
 

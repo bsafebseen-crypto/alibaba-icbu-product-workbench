@@ -7,6 +7,7 @@ import {
   beginDraftSubmission,
   buildSharedImageAssignments,
   canGenerateCompletePreviews,
+  canSubmitPublication,
   createObsidianPublishingState,
   draftsForBatch,
   formatBatchLoadStatus,
@@ -116,6 +117,13 @@ test('formal publication request targets exactly one current preview without con
     config: { appKey: 'key' }, sessionId: 'session-1', planId: 'plan-2', fingerprint: 'hash-2',
   });
   assert.throws(() => buildPublicationRequest(state, 'plan-3', {}), /完整预览/);
+});
+
+test('formal publication control remains available after the same preview created a draft', () => {
+  assert.equal(canSubmitPublication({ status: 'draft_created' }, false), true);
+  assert.equal(canSubmitPublication({ status: 'preview_ready' }, false), true);
+  assert.equal(canSubmitPublication({ status: 'publishing' }, false), false);
+  assert.equal(canSubmitPublication({ status: 'draft_created' }, true), false);
 });
 
 test('formal publication statuses clearly prohibit uncertain retries', () => {

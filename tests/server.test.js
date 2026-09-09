@@ -1399,10 +1399,10 @@ test('POST /api/obsidian/draft/verify returns Alibaba trace id without raw respo
   });
 });
 
-test('POST /api/obsidian/publication publishes one fingerprint-bound plan and verifies it', async () => {
+test('POST /api/obsidian/publication publishes one fingerprint-bound plan after its draft was created and verifies it', async () => {
   let publishCalls = 0;
   let storedTaskInput;
-  await withServer(async (baseUrl) => {
+  await withServer(async (baseUrl, rootDir) => {
     const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
     const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1416,6 +1416,14 @@ test('POST /api/obsidian/publication publishes one fingerprint-bound plan and ve
       }),
     })).json();
     assert.deepEqual(storedTaskInput.items[0].expectedImageIds, ['1', '2', '3', '4', '5', '6']);
+
+    const { readObsidianPublishingTask, updateObsidianDraftItem } = await import('../src/obsidian-task-store.js');
+    const task = await readObsidianPublishingTask(rootDir, prepared.taskId);
+    await updateObsidianDraftItem(rootDir, prepared.taskId, 'variant-1', {
+      ...task.items[0],
+      status: 'draft_created',
+      draftProductId: '1601946395256',
+    }, task.version);
 
     const response = await fetch(`${baseUrl}/api/obsidian/publication`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

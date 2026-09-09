@@ -56,7 +56,7 @@ function safeIdList(value, label) {
 }
 
 export function beginPublicationAttempt(item, input = {}) {
-  if (item?.status !== 'preview_ready') throw new Error('当前状态不允许直接发布');
+  if (!['preview_ready', 'draft_created'].includes(item?.status)) throw new Error('当前状态不允许直接发布');
   if (!input.fingerprint || item.fingerprint !== input.fingerprint) throw new Error('预览已经变化，请重新生成并确认');
   const expectedImageIds = safeIdList(input.expectedImageIds, '预期图片');
   if (expectedImageIds.length !== 6) throw new Error('正式发布必须包含 6 张图片');

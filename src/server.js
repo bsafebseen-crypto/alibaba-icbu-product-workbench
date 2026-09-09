@@ -598,7 +598,7 @@ export function createServer(options = {}) {
           let task = await readObsidianPublishingTask(rootDir, session.taskId);
           const item = task.items.find((candidate) => candidate.planId === planId);
           if (!item) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
-          if (item.status !== 'preview_ready') {
+          if (!['preview_ready', 'draft_created'].includes(item.status)) {
             throw Object.assign(new Error('当前状态不允许直接发布'), { status: 409 });
           }
           if (body.fingerprint !== preview.fingerprint || item.fingerprint !== preview.fingerprint) {
