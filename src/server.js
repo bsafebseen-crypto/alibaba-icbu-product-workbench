@@ -472,10 +472,8 @@ export function createServer(options = {}) {
             ? body.replacementDraftIds
             : {};
           const replacementByPlan = {};
+          const resumedDraftByPlan = {};
           if (repeatedPlanIds.length) {
-            if (body.replacementConfirmed !== true) {
-              throw Object.assign(new Error(`${repeatedPlanIds[0]} 已有草稿，禁止重复准备；修正版必须明确绑定原草稿 ID`), { status: 409 });
-            }
             const completedDrafts = await listObsidianDrafts(rootDir);
             for (const planId of repeatedPlanIds) {
               const draftProductId = String(replacementDraftIds[planId] || '').trim();
@@ -484,12 +482,19 @@ export function createServer(options = {}) {
                 && draft.basePlanId === body.basePlanId
                 && draft.sourceProductId === String(body.sourceContext?.sourceProductId || '')
                 && draft.planId === planId
-                && draft.draftProductId === draftProductId
+                && (!draftProductId || draft.draftProductId === draftProductId)
               ));
               if (!exactPriorDraft) {
-                throw Object.assign(new Error(`${planId} 的修正版未绑定匹配的原草稿 ID`), { status: 409 });
+                throw Object.assign(new Error(`${planId} 已完成或没有可恢复的草稿，禁止重复准备`), { status: 409 });
               }
-              replacementByPlan[planId] = draftProductId;
+              if (body.replacementConfirmed === true) {
+                if (!draftProductId) {
+                  throw Object.assign(new Error(`${planId} 的修正版未绑定匹配的原草稿 ID`), { status: 409 });
+                }
+                replacementByPlan[planId] = exactPriorDraft.draftProductId;
+              } else {
+                resumedDraftByPlan[planId] = exactPriorDraft.draftProductId;
+              }
             }
           }
           const storedBinding = await readSellingPointBinding(rootDir, context);
@@ -530,8 +535,11 @@ export function createServer(options = {}) {
             items: previews.map((preview) => ({
               planId: preview.planId,
               fingerprint: preview.fingerprint,
-              status: 'preview_ready',
+              status: resumedDraftByPlan[preview.planId] ? 'draft_created' : 'preview_ready',
               expectedImageIds: body.imagesByPlan[preview.planId].map((image) => String(image.fileId)),
+              ...(resumedDraftByPlan[preview.planId]
+                ? { draftProductId: resumedDraftByPlan[preview.planId] }
+                : {}),
               ...(replacementByPlan[preview.planId]
                 ? { replacesDraftProductId: replacementByPlan[preview.planId] }
                 : {}),

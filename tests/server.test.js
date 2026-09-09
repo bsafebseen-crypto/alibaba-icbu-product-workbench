@@ -911,7 +911,7 @@ test('POST /api/obsidian/preview rejects missing image assignments before schema
   });
 });
 
-test('POST /api/obsidian/preview requires persisted selling-point binding and rejects completed plans', async () => {
+test('POST /api/obsidian/preview requires persisted selling-point binding and resumes an existing draft for publication', async () => {
   const requestBody = {
     relativePath: 'batch.md',
     basePlanId: 'base',
@@ -920,8 +920,9 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
       sourceProductId: '1601933369105', categoryId: '32905', language: 'en_US',
       version: 'trade.1.1', schemaXml: '<itemSchema />',
     },
+    sellingPointBinding,
     imagesByPlan: {
-      'variant-1': Array.from({ length: 6 }, () => ({ fileId: 'id', url: 'https://img' })),
+      'variant-1': Array.from({ length: 6 }, (_, index) => ({ fileId: `id-${index + 1}`, url: `https://img/${index + 1}` })),
     },
   };
   await withServer(async (baseUrl) => {
@@ -937,13 +938,18 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
     readSellingPointBinding: async () => null,
   });
 
+  let storedTaskInput;
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/obsidian/preview`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody),
     });
-    assert.equal(response.status, 409);
-    assert.match((await response.json()).error, /variant-1.*已有草稿/);
+    assert.equal(response.status, 200);
+    assert.deepEqual(storedTaskInput.items[0], {
+      planId: 'variant-1', fingerprint: 'hash-variant-1', status: 'draft_created',
+      expectedImageIds: ['id-1', 'id-2', 'id-3', 'id-4', 'id-5', 'id-6'],
+      draftProductId: '1601935213152',
+    });
   }, {
     readObsidianBatch: async () => ({ batchId: 'batch', plans: [] }),
     createObsidianVariants: () => [{ planId: 'variant-1' }, { planId: 'variant-2' }],
@@ -953,6 +959,17 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
     }),
     validateSellingPointBinding: (_schemaXml, binding) => binding,
     listCompletedObsidianPlanIds: async () => ['variant-1'],
+    listObsidianDrafts: async () => [{
+      relativePath: 'batch.md', basePlanId: 'base', sourceProductId: '1601933369105',
+      planId: 'variant-1', draftProductId: '1601935213152',
+    }],
+    createStrictProductPreview: (_schemaXml, variant) => ({
+      fingerprint: `hash-${variant.planId}`, previewXml: '<preview />', changedFields: ['sellingPoints'],
+    }),
+    createObsidianPublishingTask: async (_rootDir, input) => {
+      storedTaskInput = input;
+      return { id: 'resume-task', version: 1 };
+    },
   });
 });
 
