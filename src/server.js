@@ -566,6 +566,7 @@ export function createServer(options = {}) {
             sessionId,
             taskId: task.id,
             taskVersion: task.version,
+            items: task.items,
           });
         } catch (error) {
           if (!error.status) error.status = error.code === 'ENOENT' ? 404 : 400;

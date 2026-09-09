@@ -154,6 +154,15 @@ export function canSubmitPublication(item, writeLocked) {
   return !writeLocked && ['preview_ready', 'draft_created'].includes(item?.status);
 }
 
+export function draftItemsFromPreviewResult(result = {}) {
+  const items = Array.isArray(result.items) && result.items.length
+    ? result.items
+    : (result.previews || []).map((preview) => ({
+      planId: preview.planId, fingerprint: preview.fingerprint, status: 'preview_ready',
+    }));
+  return Object.fromEntries(items.map((item) => [item.planId, item]));
+}
+
 export function remainingPlans(batch, basePlanId) {
   if (!batch?.plans?.some((plan) => plan.id === basePlanId)) {
     throw new Error('请选择批次中的一个母商品方案');
@@ -999,17 +1008,17 @@ export function initObsidianPublishing({
       state.previews = result.previews;
       state.sessionId = result.sessionId;
       state.taskId = result.taskId;
-      state.draftItems = Object.fromEntries(result.previews.map((preview) => [
-        preview.planId,
-        { planId: preview.planId, fingerprint: preview.fingerprint, status: 'preview_ready' },
-      ]));
+      state.draftItems = draftItemsFromPreviewResult(result);
       for (const preview of state.previews) {
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(preview.planId)}"]`);
         text(card?.querySelector('.obsidian-variant-status'), `完整预览通过 · ${preview.fingerprint.slice(0, 10)}`);
         const button = card?.querySelector('.obsidian-draft-button');
         if (button) {
           button.disabled = false;
-          button.textContent = '确认并创建此商品草稿';
+          const item = state.draftItems[preview.planId];
+          button.textContent = item?.status === 'draft_created'
+            ? `草稿已存在 · ${item.draftProductId}`
+            : '确认并创建此商品草稿';
         }
         const publicationButton = card?.querySelector('.obsidian-publication-button');
         if (publicationButton) {
@@ -1017,6 +1026,7 @@ export function initObsidianPublishing({
           publicationButton.textContent = '直接正式发布此产品';
         }
       }
+      syncDraftSubmissionControls();
       setPreviewStatus(formatPreviewSuccess(state.previews.length), 'success');
       text(elements.draftStatus, '草稿测试已就绪。请逐个核对方案卡，然后单独点击并确认。');
     } catch (error) {

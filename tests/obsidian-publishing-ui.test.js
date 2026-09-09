@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as publishingUi from '../public/obsidian-publishing.js';
 
 import {
   buildPreviewRequest,
@@ -124,6 +125,16 @@ test('formal publication control remains available after the same preview create
   assert.equal(canSubmitPublication({ status: 'preview_ready' }, false), true);
   assert.equal(canSubmitPublication({ status: 'publishing' }, false), false);
   assert.equal(canSubmitPublication({ status: 'draft_created' }, true), false);
+});
+
+test('preview state uses the server task items so resumed drafts stay draft-only disabled', () => {
+  const result = {
+    previews: [{ planId: 'plan-2', fingerprint: 'hash-2' }],
+    items: [{ planId: 'plan-2', fingerprint: 'hash-2', status: 'draft_created', draftProductId: '1602' }],
+  };
+  assert.deepEqual(publishingUi.draftItemsFromPreviewResult?.(result), {
+    'plan-2': result.items[0],
+  });
 });
 
 test('formal publication statuses clearly prohibit uncertain retries', () => {

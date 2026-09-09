@@ -945,6 +945,9 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
       body: JSON.stringify(requestBody),
     });
     assert.equal(response.status, 200);
+    const responseBody = await response.json();
+    assert.equal(responseBody.items[0].status, 'draft_created');
+    assert.equal(responseBody.items[0].draftProductId, '1601935213152');
     assert.deepEqual(storedTaskInput.items[0], {
       planId: 'variant-1', fingerprint: 'hash-variant-1', status: 'draft_created',
       expectedImageIds: ['id-1', 'id-2', 'id-3', 'id-4', 'id-5', 'id-6'],
@@ -969,7 +972,7 @@ test('POST /api/obsidian/preview requires persisted selling-point binding and re
     }),
     createObsidianPublishingTask: async (_rootDir, input) => {
       storedTaskInput = input;
-      return { id: 'resume-task', version: 1 };
+      return { id: 'resume-task', version: 1, items: input.items };
     },
   });
 });
