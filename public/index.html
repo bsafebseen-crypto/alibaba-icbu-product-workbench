@@ -26,6 +26,18 @@
           </span>
           <span class="nav-label"><strong>Obsidian 上品</strong><small>五方案转四个类似品</small></span>
         </button>
+        <button class="module-link" type="button" data-module="keyword-records">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM7 9h10M7 13h7M7 17h5"/></svg>
+          </span>
+          <span class="nav-label"><strong>关键词记录</strong><small>询盘词与屏蔽词</small></span>
+        </button>
+        <button class="module-link" type="button" data-module="1688-publishing">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM7 10h4M7 14h7M17 9v6"/></svg>
+          </span>
+          <span class="nav-label"><strong>1688 自动发品</strong><small>独立授权与单品闭环</small></span>
+        </button>
         <button class="module-link" type="button" data-module="alibaba-settings">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 7h16v11H4zM8 7V4h8v3M8 12h8M8 15h5"/></svg>
@@ -328,6 +340,186 @@
         </section>
       </section>
 
+      <section class="module-page" id="module-keyword-records" aria-labelledby="keyword-records-title" hidden>
+        <header class="page-header compact-page-header">
+          <div>
+            <h1 id="keyword-records-title">关键词记录</h1>
+            <p>按 Product ID 保存询盘词，并记录直通车已经屏蔽的关键词。</p>
+          </div>
+          <span class="keyword-local-badge">仅保存在本机</span>
+        </header>
+
+        <section class="console-panel keyword-record-panel">
+          <div class="keyword-record-tabs" role="tablist" aria-label="关键词记录类型">
+            <button class="active" type="button" role="tab" aria-selected="true" data-keyword-tab="inquiry">询盘词库</button>
+            <button type="button" role="tab" aria-selected="false" data-keyword-tab="blocked">直通车屏蔽词</button>
+          </div>
+          <p class="keyword-record-status" id="keyword-record-status" role="status">打开本页后读取本地记录。</p>
+
+          <div class="keyword-record-layout" data-keyword-view="inquiry">
+            <aside class="keyword-product-panel">
+              <div class="keyword-section-head"><div><strong>Product ID</strong><small>只记录国际站商品 ID</small></div></div>
+              <input id="keyword-product-search" type="search" autocomplete="off" placeholder="搜索 Product ID">
+              <div class="keyword-product-list" id="keyword-product-list"></div>
+              <div class="keyword-add-product">
+                <input id="keyword-product-id" type="text" inputmode="numeric" autocomplete="off" placeholder="输入 Product ID">
+                <button class="button primary" id="keyword-product-add" type="button">添加 ID</button>
+              </div>
+            </aside>
+
+            <div class="keyword-detail-panel">
+              <div class="keyword-detail-title">
+                <div><span>当前 Product ID</span><strong id="keyword-selected-product">尚未选择</strong></div>
+                <div class="keyword-toolbar-actions">
+                  <button class="button quiet" id="keyword-inquiry-add" type="button" disabled>添加询盘词</button>
+                  <button class="button primary" id="keyword-inquiry-batch" type="button" disabled>批量添加询盘词</button>
+                </div>
+              </div>
+              <input id="keyword-inquiry-search" type="search" autocomplete="off" placeholder="搜索关键词或备注">
+              <div class="keyword-table-wrap">
+                <table class="keyword-table">
+                  <thead><tr><th>关键词</th><th>备注</th><th>添加时间</th><th>操作</th></tr></thead>
+                  <tbody id="keyword-inquiry-body"></tbody>
+                </table>
+                <p class="keyword-table-empty" id="keyword-inquiry-empty">请先在左侧新增并选择 Product ID</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="keyword-blocked-view" data-keyword-view="blocked" hidden>
+            <div class="keyword-blocked-toolbar">
+              <input id="keyword-blocked-search" type="search" autocomplete="off" placeholder="搜索屏蔽词或备注">
+              <select id="keyword-blocked-product-filter" aria-label="按 Product ID 筛选"><option value="">全部 Product ID</option></select>
+              <button class="button quiet" id="keyword-blocked-add" type="button">新增屏蔽词</button>
+              <button class="button primary" id="keyword-blocked-batch" type="button">批量添加屏蔽词</button>
+            </div>
+            <div class="keyword-table-wrap">
+              <table class="keyword-table">
+                <thead><tr><th>关键词</th><th>对应 Product ID</th><th>备注</th><th>添加时间</th><th>操作</th></tr></thead>
+                <tbody id="keyword-blocked-body"></tbody>
+              </table>
+              <p class="keyword-table-empty" id="keyword-blocked-empty">还没有直通车屏蔽词</p>
+            </div>
+          </div>
+
+          <dialog class="keyword-dialog" id="keyword-record-dialog">
+            <form id="keyword-record-form">
+              <header><h2 id="keyword-record-dialog-title">新增关键词</h2><p>只保存关键词、可选备注和 Product ID。</p></header>
+              <label id="keyword-record-product-field"><span>对应 Product ID（可为空）</span><input id="keyword-record-product-id" type="text" inputmode="numeric" autocomplete="off"></label>
+              <label><span>关键词</span><input id="keyword-record-keyword" type="text" autocomplete="off" required></label>
+              <label><span>备注（可选）</span><input id="keyword-record-note" type="text" autocomplete="off"></label>
+              <footer><button class="button quiet" id="keyword-record-cancel" type="button">取消</button><button class="button primary" type="submit">保存</button></footer>
+            </form>
+          </dialog>
+
+          <dialog class="keyword-dialog" id="keyword-batch-dialog">
+            <form id="keyword-batch-form">
+              <header><h2 id="keyword-batch-dialog-title">批量添加询盘词</h2><p>每行一个关键词，空行会忽略，重复项会自动跳过。</p></header>
+              <label id="keyword-batch-product-field"><span>对应 Product ID（可为空）</span><input id="keyword-batch-product-id" type="text" inputmode="numeric" autocomplete="off"></label>
+              <label><span>关键词</span><textarea id="keyword-batch-keywords" rows="10" required placeholder="reflective safety vest&#10;high visibility vest&#10;hi vis work vest"></textarea></label>
+              <footer><button class="button quiet" id="keyword-batch-cancel" type="button">取消</button><button class="button primary" type="submit">批量保存</button></footer>
+            </form>
+          </dialog>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-1688-publishing" aria-labelledby="1688-publishing-title" hidden>
+        <header class="page-header compact-page-header">
+          <div>
+            <p class="kicker">1688 OPEN PLATFORM</p>
+            <h1 id="1688-publishing-title">1688 自动发品</h1>
+            <p>使用独立的 1688 开放平台配置，先完成只读诊断、类目规则和本地预检，再逐件确认发布。</p>
+          </div>
+          <div class="header-status"><span>安全模式</span><strong>默认禁止真实写入</strong></div>
+        </header>
+
+        <div class="obsidian-flow" aria-label="1688 单商品发布流程">
+          <span class="active"><b>1</b><i>独立授权</i></span>
+          <span><b>2</b><i>类目规则</i></span>
+          <span><b>3</b><i>图片与商品</i></span>
+          <span><b>4</b><i>预检与预览</i></span>
+          <span><b>5</b><i>逐件发布核验</i></span>
+        </div>
+
+        <section class="console-panel publishing-1688-panel">
+          <div class="panel-band blue"><strong>1. 1688 独立配置与只读连接</strong><span>不会复用国际站 Token</span></div>
+          <div class="publishing-1688-grid">
+            <label><span>API 网关</span><input id="1688-gateway" type="url" value="https://gw.open.1688.com" spellcheck="false"></label>
+            <label><span>OAuth 授权地址</span><input id="1688-authorize-url" type="url" value="https://auth.1688.com/oauth/authorize" spellcheck="false"></label>
+            <label><span>App Key</span><input id="1688-app-key" type="text" autocomplete="off"></label>
+            <label><span>应用名称</span><input id="1688-app-name" type="text" autocomplete="off" placeholder="必须与开放平台后台一致"></label>
+            <label><span>App Secret</span><input id="1688-app-secret" type="password" autocomplete="off"></label>
+            <label><span>HTTPS 回调地址</span><input id="1688-redirect-uri" type="url" autocomplete="off"></label>
+            <label><span>Access Token</span><input id="1688-access-token" type="password" autocomplete="off"></label>
+            <label><span>授权后网址或 Code</span><input id="1688-auth-code" type="text" autocomplete="off" spellcheck="false"></label>
+          </div>
+          <label class="check-field"><input id="1688-remember" type="checkbox"><span><strong>在本机浏览器中长期记住 Secret 和 Token</strong><small>不勾选时仅保留到关闭浏览器；凭证不会写入任务 JSON。</small></span></label>
+          <div class="publishing-1688-actions">
+            <button class="button quiet" id="1688-save" type="button">保存独立配置</button>
+            <button class="button quiet" id="1688-authorize" type="button">打开 1688 授权页</button>
+            <button class="button quiet" id="1688-exchange" type="button">换取 Token</button>
+            <button class="button quiet" id="1688-refresh" type="button">刷新 Token</button>
+            <button class="button primary" id="1688-test" type="button">只读连接测试</button>
+          </div>
+          <p class="inline-status" id="1688-connection-status" role="status">尚未验证账号、解决方案订购和商品权限。</p>
+          <div class="publishing-1688-sdk">
+            <button class="button quiet" id="1688-sdk-test" type="button">加载并诊断官方前端 JS SDK</button>
+            <p id="1688-sdk-status" role="status">新版商品发布依赖官方动态 Schema 与 JS SDK；缺少时会明确阻止发布。</p>
+          </div>
+        </section>
+
+        <section class="console-panel publishing-1688-panel">
+          <div class="panel-band teal"><strong>2. 搜索叶子类目并读取发布规则</strong><span>官方 Schema，只读</span></div>
+          <div class="publishing-1688-category">
+            <label><span>类目关键词</span><input id="1688-category-keyword" type="text" autocomplete="off" placeholder="例如：反光背心"></label>
+            <button class="button quiet" id="1688-category-search" type="button">搜索官方类目</button>
+            <label><span>候选类目</span><select id="1688-category-select"><option value="">请先搜索</option></select></label>
+            <button class="button primary" id="1688-load-schema" type="button">读取规则与必填属性</button>
+          </div>
+          <p class="inline-status" id="1688-schema-status" role="status">尚未读取类目规则。</p>
+          <pre class="publishing-1688-schema" id="1688-schema-fields">读取后显示官方字段摘要。</pre>
+        </section>
+
+        <section class="console-panel publishing-1688-panel">
+          <div class="panel-band orange"><strong>3. 单商品内容与官方图片空间</strong><span>图片必须手动确认上传</span></div>
+          <div class="publishing-1688-grid">
+            <label><span>商品标题</span><input id="1688-title" type="text" autocomplete="off"></label>
+            <label><span>货号（用于不确定结果核验）</span><input id="1688-cargo-number" type="text" autocomplete="off"></label>
+            <label><span>起订量</span><input id="1688-begin-amount" type="number" min="1" step="1" value="1"></label>
+            <label class="publishing-1688-wide"><span>商品属性 JSON</span><textarea id="1688-attributes" rows="6" spellcheck="false">{}</textarea></label>
+            <label class="publishing-1688-wide"><span>SKU / 价格 / 库存 JSON</span><textarea id="1688-skus" rows="7" spellcheck="false">[]</textarea></label>
+            <label class="publishing-1688-wide"><span>阶梯价格 JSON</span><textarea id="1688-price-ranges" rows="5" spellcheck="false">[]</textarea></label>
+            <label class="publishing-1688-wide"><span>图文详情 HTML</span><textarea id="1688-detail" rows="8" spellcheck="false"></textarea></label>
+          </div>
+          <div class="publishing-1688-upload">
+            <label><span>本地商品图片</span><input id="1688-images" type="file" multiple accept="image/jpeg,image/png,image/gif,image/bmp"></label>
+            <button class="button quiet" id="1688-upload-images" type="button">确认上传所选图片</button>
+          </div>
+          <p class="inline-status" id="1688-image-status" role="status">每张图片必须符合官方格式且不超过 2 MB。</p>
+          <div class="publishing-1688-image-list" id="1688-image-list"></div>
+        </section>
+
+        <section class="console-panel publishing-1688-panel">
+          <div class="panel-band blue"><strong>4. 本地只读预检与完整预览</strong><span>不创建商品</span></div>
+          <div class="publishing-1688-actions">
+            <button class="button primary" id="1688-preflight" type="button">执行只读预检</button>
+            <button class="button quiet" id="1688-save-task" type="button">保存当前任务</button>
+          </div>
+          <p class="inline-status" id="1688-preflight-status" role="status">尚未预检。未知的必填组件会硬阻止发布。</p>
+          <pre class="publishing-1688-preview" id="1688-preview">预检后显示完整本地商品与安全请求摘要。</pre>
+        </section>
+
+        <section class="console-panel publishing-1688-panel">
+          <div class="panel-band red"><strong>5. 确认并发布当前这一件</strong><span>一次点击最多一次真实写请求</span></div>
+          <p>发布按钮只有在预检、写权限、官方 SDK 和持久化任务全部通过后才会启用。超时或返回不确定时不会自动重发，只允许官方只读核验。</p>
+          <div class="publishing-1688-actions">
+            <button class="button primary" id="1688-publish" type="button" disabled>确认并发布当前这一件</button>
+            <button class="button quiet" id="1688-reconcile" type="button" disabled>只读核验发布结果</button>
+          </div>
+          <p class="inline-status" id="1688-publication-status" role="status">尚未保存任务，也未调用真实发布接口。</p>
+        </section>
+      </section>
+
       <section class="module-page" id="module-keywords" aria-labelledby="keywords-title" hidden>
         <header class="page-header">
           <div>
@@ -407,7 +599,7 @@
           </div>
           <div class="settings-form">
             <label class="field"><span>API 网关</span><input id="ali-gateway" type="url" value="https://open-api.alibaba.com" spellcheck="false"></label>
-            <label class="field"><span>App Key</span><input id="ali-app-key" type="text" inputmode="numeric" autocomplete="off" placeholder="例如：511556"></label>
+            <label class="field"><span>App Key</span><input id="ali-app-key" type="text" inputmode="numeric" autocomplete="off" placeholder="例如：123456"></label>
             <label class="field"><span>App Secret</span><div class="secret-field"><input id="ali-app-secret" type="password" autocomplete="off"><button class="secret-toggle" data-secret-target="ali-app-secret" type="button">显示</button></div></label>
             <div class="oauth-panel">
               <div class="oauth-head"><div><span>店铺授权</span><strong>获取 Access Token</strong></div><button class="button quiet" id="ali-authorize" type="button">打开阿里授权页</button></div>

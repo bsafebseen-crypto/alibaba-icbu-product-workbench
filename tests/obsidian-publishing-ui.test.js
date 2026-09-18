@@ -23,6 +23,7 @@ import {
   applySellingPointBinding,
   chooseBatchAfterRefresh,
   pendingVariants,
+  publicationsForTask,
   preferredBatchPath,
   prepareReplacementVariant,
   remainingPlans,
@@ -144,6 +145,17 @@ test('formal publication statuses clearly prohibit uncertain retries', () => {
   assert.equal(formatPublicationStatus({ status: 'reconciliation_ambiguous' }), '正在自动辨认发布结果，禁止重复提交');
   assert.equal(formatPublicationStatus({ status: 'reconciliation_unresolved' }), '自动核验未能唯一确认，已禁止重复发布');
   assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: 'bad field' }), '阿里明确拒绝：bad field');
+});
+
+test('saved publication records never cross from another task with the same plan id', () => {
+  const publications = [
+    { taskId: 'old-task', batchId: 'old-batch', planId: 'plan-3', status: 'reconciling' },
+    { taskId: 'current-task', batchId: 'current-batch', planId: 'plan-2', status: 'reconciling' },
+    { taskId: 'current-task', batchId: 'current-batch', planId: 'plan-3', status: 'preview_ready' },
+  ];
+
+  assert.deepEqual(publicationsForTask(publications, 'current-task'), publications.slice(1));
+  assert.deepEqual(publicationsForTask(publications, ''), []);
 });
 
 test('Alibaba request errors include the failed stage and request id', () => {

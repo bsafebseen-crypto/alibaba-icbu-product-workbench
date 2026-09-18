@@ -1,6 +1,8 @@
 node_modules/
 data/tasks/
 data/inquiry-review/
+data/runtime/
+data/*.json
 .env
 .env.*
 *.log

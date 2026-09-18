@@ -22,6 +22,35 @@ import {
   testAlibabaConnection as defaultTestAlibabaConnection,
   uploadAlibabaPhoto as defaultUploadAlibabaPhoto,
 } from './alibaba-client.js';
+import {
+  exchange1688Code as defaultExchange1688Code,
+  get1688Category as defaultGet1688Category,
+  get1688Product as defaultGet1688Product,
+  get1688ProductSchema as defaultGet1688ProductSchema,
+  get1688ProductSubSchema as defaultGet1688ProductSubSchema,
+  list1688Products as defaultList1688Products,
+  publish1688Product as defaultPublish1688Product,
+  refresh1688Token as defaultRefresh1688Token,
+  search1688Categories as defaultSearch1688Categories,
+  upload1688Photo as defaultUpload1688Photo,
+} from './1688-client.js';
+import {
+  build1688PublishRequest as defaultBuild1688PublishRequest,
+  parse1688Schema as defaultParse1688Schema,
+} from './1688-schema.js';
+import {
+  create1688Task as defaultCreate1688Task,
+  list1688Tasks as defaultList1688Tasks,
+  read1688Task as defaultRead1688Task,
+  update1688Task as defaultUpdate1688Task,
+} from './1688-task-store.js';
+import {
+  begin1688Publication,
+  fail1688Publication,
+  finish1688Publication,
+  mark1688PublicationUncertain,
+} from './1688-publishing-state.js';
+import { reconcile1688Publication as defaultReconcile1688Publication } from './1688-publication-reconciliation.js';
 import { createManualProducts, createSimilarProductsFromTemplate } from './core.js';
 import { parseKeywordWorkbook as defaultParseKeywordWorkbook } from './keyword-workbook.js';
 import {
@@ -82,6 +111,7 @@ import {
   readTask as defaultReadTask,
   saveTask,
 } from './task-store.js';
+import { createKeywordRecordStore } from './keyword-record-store.js';
 
 const BODY_LIMIT = 10 * 1024 * 1024;
 const IMAGE_GENERATION_BODY_LIMIT = 24 * 1024 * 1024;
@@ -104,6 +134,8 @@ async function serveStatic(rootDir, pathname, response) {
     '/similar-product-ui.js': ['similar-product-ui.js', 'text/javascript; charset=utf-8'],
     '/product-pool.js': ['product-pool.js', 'text/javascript; charset=utf-8'],
     '/obsidian-publishing.js': ['obsidian-publishing.js', 'text/javascript; charset=utf-8'],
+    '/1688-publishing.js': ['1688-publishing.js', 'text/javascript; charset=utf-8'],
+    '/keyword-records.js': ['keyword-records.js', 'text/javascript; charset=utf-8'],
     '/shared-image-assignment.js': ['shared-image-assignment.js', 'text/javascript; charset=utf-8'],
   };
   const entry = files[pathname];
@@ -170,12 +202,69 @@ function decodeImageDataUrl(dataUrl) {
   return { mimeType: match[1], imageBytes };
 }
 
+function decode1688ImageDataUrl(dataUrl) {
+  const match = String(dataUrl || '').match(
+    /^data:(image\/(?:jpeg|png|gif|bmp));base64,([A-Za-z0-9+/]+={0,2})$/,
+  );
+  if (!match) {
+    throw Object.assign(new Error('1688 图片仅支持 jpg、jpeg、gif、bmp、png 格式'), { status: 400 });
+  }
+  const bytes = Buffer.from(match[2], 'base64');
+  if (!bytes.length) throw Object.assign(new Error('1688 图片内容为空'), { status: 400 });
+  if (bytes.length > 2 * 1024 * 1024) {
+    throw Object.assign(new Error('1688 官方图片空间要求单张图片不能超过 2 MB'), { status: 413 });
+  }
+  return { mimeType: match[1], bytes };
+}
+
 export function createServer(options = {}) {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
+  const keywordRecordStore = options.keywordRecordStore ?? createKeywordRecordStore(rootDir);
   const testAiConnection = options.testAiConnection ?? defaultTestAiConnection;
   const testAlibabaConnection = options.testAlibabaConnection ?? defaultTestAlibabaConnection;
   const exchangeAlibabaCode = options.exchangeAlibabaCode ?? defaultExchangeAlibabaCode;
   const refreshAlibabaToken = options.refreshAlibabaToken ?? defaultRefreshAlibabaToken;
+  const exchange1688Code = options.exchange1688Code ?? defaultExchange1688Code;
+  const refresh1688Token = options.refresh1688Token ?? defaultRefresh1688Token;
+  const search1688Categories = options.search1688Categories ?? defaultSearch1688Categories;
+  const get1688Category = options.get1688Category ?? defaultGet1688Category;
+  const get1688ProductSchema = options.get1688ProductSchema ?? defaultGet1688ProductSchema;
+  const get1688ProductSubSchema = options.get1688ProductSubSchema ?? defaultGet1688ProductSubSchema;
+  const upload1688Photo = options.upload1688Photo ?? defaultUpload1688Photo;
+  const publish1688Product = options.publish1688Product ?? defaultPublish1688Product;
+  const get1688Product = options.get1688Product ?? defaultGet1688Product;
+  const list1688Products = options.list1688Products ?? defaultList1688Products;
+  const reconcile1688Publication = options.reconcile1688Publication ?? defaultReconcile1688Publication;
+  const parse1688Schema = options.parse1688Schema ?? defaultParse1688Schema;
+  const build1688PublishRequest = options.build1688PublishRequest ?? defaultBuild1688PublishRequest;
+  const create1688Task = options.create1688Task ?? defaultCreate1688Task;
+  const read1688Task = options.read1688Task ?? defaultRead1688Task;
+  const list1688Tasks = options.list1688Tasks ?? defaultList1688Tasks;
+  const update1688Task = options.update1688Task ?? defaultUpdate1688Task;
+  const allow1688Writes = options.allow1688Writes === true;
+  const test1688Connection = options.test1688Connection ?? (async (config, context = {}) => {
+    await search1688Categories(config, '服装');
+    if (context.categoryId && context.scene) {
+      parse1688Schema(await get1688ProductSchema(config, {
+        catId: context.categoryId,
+        scene: context.scene,
+      }));
+      return {
+        ok: true,
+        stage: 'schema',
+        message: '1688 只读连接和目标类目新版商品规则验证成功',
+        missing: [],
+        writeReady: true,
+      };
+    }
+    return {
+      ok: true,
+      stage: 'readonly',
+      message: '1688 签名、授权和只读类目接口验证成功',
+      missing: ['尚未用目标叶子类目验证新版商品管理方案权限'],
+      writeReady: false,
+    };
+  });
   const loadAlibabaProductTemplate = options.loadAlibabaProductTemplate ?? defaultLoadAlibabaProductTemplate;
   const loadAlibabaProductContext = options.loadAlibabaProductContext ?? defaultLoadAlibabaProductContext;
   const loadAlibabaProductDraft = options.loadAlibabaProductDraft ?? defaultLoadAlibabaProductDraft;
@@ -218,6 +307,7 @@ export function createServer(options = {}) {
   const nowMs = options.nowMs ?? Date.now;
   const previewSessions = new Map();
   let productWriteLock = null;
+  let write1688Lock = false;
 
   function nowIso() {
     return new Date(nowMs()).toISOString();
@@ -240,6 +330,28 @@ export function createServer(options = {}) {
     productWriteLock.releaseAt = nowMs() + 3000;
   }
 
+  function isTaskVersionConflict(error) {
+    return error.status === 409 && error.message === '任务状态已经变化，请刷新后重试';
+  }
+
+  async function persistPublicationTransition(taskId, planId, nextItem, allowedStatuses) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const task = await readObsidianPublishingTask(rootDir, taskId);
+      const currentItem = task.items.find((candidate) => candidate.planId === planId);
+      if (!currentItem) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+      if (!allowedStatuses.includes(currentItem.status)
+        || currentItem.fingerprint !== nextItem.fingerprint) {
+        throw Object.assign(new Error('当前发布状态已经变化，请刷新后查看'), { status: 409 });
+      }
+      try {
+        return await updateObsidianDraftItem(rootDir, taskId, planId, nextItem, task.version);
+      } catch (error) {
+        if (!isTaskVersionConflict(error) || attempt === 4) throw error;
+      }
+    }
+    throw Object.assign(new Error('任务状态持续变化，请稍后重试'), { status: 409 });
+  }
+
   async function reconcileStoredPublication(config, taskId, planId) {
     let task = await readObsidianPublishingTask(rootDir, taskId);
     const item = task.items.find((candidate) => candidate.planId === planId);
@@ -257,7 +369,9 @@ export function createServer(options = {}) {
       const unresolved = markPublicationUnresolved(item, {
         candidateProductIds: item.candidateProductIds || [], completedAt: nowIso(),
       });
-      task = await updateObsidianDraftItem(rootDir, taskId, planId, unresolved, task.version);
+      task = await persistPublicationTransition(
+        taskId, planId, unresolved, ['reconciling', 'reconciliation_ambiguous'],
+      );
       return { task, item: unresolved };
     }
     const result = await reconcilePublication({
@@ -289,7 +403,9 @@ export function createServer(options = {}) {
       });
       nextItem.reconciliationAttempts = attemptNumber + 1;
     }
-    task = await updateObsidianDraftItem(rootDir, taskId, planId, nextItem, task.version);
+    task = await persistPublicationTransition(
+      taskId, planId, nextItem, ['reconciling', 'reconciliation_ambiguous'],
+    );
     return { task, item: nextItem };
   }
 
@@ -299,6 +415,301 @@ export function createServer(options = {}) {
     try {
       if (request.method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/keyword-records') {
+        sendJson(response, 200, await keywordRecordStore.readAll());
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/keyword-records/products') {
+        sendJson(response, 201, await keywordRecordStore.addProduct(await readJson(request)));
+        return;
+      }
+
+      const keywordProductMatch = url.pathname.match(/^\/api\/keyword-records\/products\/([^/]+)$/);
+      if (request.method === 'DELETE' && keywordProductMatch) {
+        sendJson(response, 200, await keywordRecordStore.removeProduct(decodeURIComponent(keywordProductMatch[1])));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/keyword-records/inquiry') {
+        sendJson(response, 201, await keywordRecordStore.addInquiryKeyword(await readJson(request)));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/keyword-records/inquiry/batch') {
+        sendJson(response, 201, await keywordRecordStore.batchAddInquiryKeywords(await readJson(request)));
+        return;
+      }
+
+      const inquiryKeywordMatch = url.pathname.match(/^\/api\/keyword-records\/inquiry\/([^/]+)$/);
+      if (request.method === 'PATCH' && inquiryKeywordMatch) {
+        sendJson(response, 200, await keywordRecordStore.updateInquiryKeyword(
+          decodeURIComponent(inquiryKeywordMatch[1]), await readJson(request),
+        ));
+        return;
+      }
+      if (request.method === 'DELETE' && inquiryKeywordMatch) {
+        sendJson(response, 200, await keywordRecordStore.removeInquiryKeyword(
+          decodeURIComponent(inquiryKeywordMatch[1]),
+        ));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/keyword-records/blocked') {
+        sendJson(response, 201, await keywordRecordStore.addBlockedKeyword(await readJson(request)));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/keyword-records/blocked/batch') {
+        sendJson(response, 201, await keywordRecordStore.batchAddBlockedKeywords(await readJson(request)));
+        return;
+      }
+
+      const blockedKeywordMatch = url.pathname.match(/^\/api\/keyword-records\/blocked\/([^/]+)$/);
+      if (request.method === 'PATCH' && blockedKeywordMatch) {
+        sendJson(response, 200, await keywordRecordStore.updateBlockedKeyword(
+          decodeURIComponent(blockedKeywordMatch[1]), await readJson(request),
+        ));
+        return;
+      }
+      if (request.method === 'DELETE' && blockedKeywordMatch) {
+        sendJson(response, 200, await keywordRecordStore.removeBlockedKeyword(
+          decodeURIComponent(blockedKeywordMatch[1]),
+        ));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/token/exchange') {
+        const body = await readJson(request);
+        sendJson(response, 200, await exchange1688Code(body.config, body.code));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/token/refresh') {
+        const body = await readJson(request);
+        sendJson(response, 200, await refresh1688Token(body.config, body.refreshToken));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/connection/test') {
+        const body = await readJson(request);
+        sendJson(response, 200, await test1688Connection(body.config, {
+          categoryId: body.categoryId,
+          scene: body.scene,
+        }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/categories/search') {
+        const body = await readJson(request);
+        sendJson(response, 200, await search1688Categories(body.config, body.keyword));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/categories/get') {
+        const body = await readJson(request);
+        sendJson(response, 200, await get1688Category(body.config, body.categoryId));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/schema/get') {
+        const body = await readJson(request);
+        sendJson(response, 200, await get1688ProductSchema(body.config, {
+          catId: body.catId,
+          scene: body.scene,
+          offerId: body.offerId,
+          bizParam: body.bizParam,
+        }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/schema/sub') {
+        const body = await readJson(request);
+        sendJson(response, 200, await get1688ProductSubSchema(body.config, {
+          catId: body.catId,
+          scene: body.scene,
+          dataBody: body.dataBody,
+          bizParam: body.bizParam,
+        }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/preflight') {
+        const body = await readJson(request);
+        const schema = parse1688Schema(body.schema?.raw || body.schema);
+        sendJson(response, 200, build1688PublishRequest({
+          schema,
+          catId: body.catId,
+          scene: body.scene,
+          formValues: body.formValues,
+        }));
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/images/upload') {
+        const body = await readJson(request);
+        if (body.confirmUpload !== true) {
+          throw Object.assign(new Error('请确认上传当前这一张图片到 1688 官方图片空间'), { status: 400 });
+        }
+        const decoded = decode1688ImageDataUrl(body.image?.dataUrl);
+        const result = await upload1688Photo(body.config, {
+          albumId: body.image?.albumId,
+          name: body.image?.fileName,
+          description: body.image?.description,
+          drawTxt: body.image?.drawTxt,
+          mimeType: decoded.mimeType,
+          bytes: decoded.bytes,
+        });
+        sendJson(response, 200, result);
+        return;
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/1688/tasks') {
+        sendJson(response, 200, { tasks: await list1688Tasks(rootDir) });
+        return;
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/1688/tasks') {
+        const body = await readJson(request);
+        const task = await create1688Task(rootDir, body.task, body.id);
+        sendJson(response, 201, { task });
+        return;
+      }
+
+      const task1688Match = url.pathname.match(/^\/api\/1688\/tasks\/([^/]+)$/);
+      if (request.method === 'GET' && task1688Match) {
+        const task = await read1688Task(rootDir, decodeURIComponent(task1688Match[1]));
+        sendJson(response, 200, { task });
+        return;
+      }
+
+      if (request.method === 'PUT' && task1688Match) {
+        const body = await readJson(request);
+        const task = await update1688Task(
+          rootDir,
+          decodeURIComponent(task1688Match[1]),
+          body.task,
+          body.version,
+        );
+        sendJson(response, 200, { task });
+        return;
+      }
+
+      const publish1688Match = url.pathname.match(
+        /^\/api\/1688\/tasks\/([^/]+)\/products\/([^/]+)\/publish$/,
+      );
+      if (request.method === 'POST' && publish1688Match) {
+        const body = await readJson(request);
+        if (!allow1688Writes) {
+          throw Object.assign(new Error('1688 真实发布默认关闭；完成只读验证后仍需显式启用'), { status: 403 });
+        }
+        if (body.confirmation !== true) {
+          throw Object.assign(new Error('请明确确认只发布当前这一件 1688 商品'), { status: 400 });
+        }
+        if (body.sdkReady !== true) {
+          throw Object.assign(new Error('1688 官方前端 JS SDK 尚未完成诊断，不能真实发布'), { status: 403 });
+        }
+        const taskId = decodeURIComponent(publish1688Match[1]);
+        const capabilityTask = await read1688Task(rootDir, taskId);
+        const capability = await test1688Connection(body.config, {
+          categoryId: capabilityTask.categoryId,
+          scene: capabilityTask.scene,
+        });
+        if (!capability?.ok || capability.writeReady !== true) {
+          throw Object.assign(new Error(
+            capability?.message || '当前 1688 应用尚未具备商品发布权限',
+          ), { status: 403, code: capability?.code });
+        }
+        if (write1688Lock) {
+          throw Object.assign(new Error('另一件 1688 商品正在发布或核验，请稍后再试'), { status: 409 });
+        }
+        write1688Lock = true;
+        try {
+          const productKey = decodeURIComponent(publish1688Match[2]);
+          let task = await read1688Task(rootDir, taskId);
+          if (task.version !== body.version) {
+            throw Object.assign(new Error('1688 任务状态已经变化，请刷新后重试'), { status: 409 });
+          }
+          if (String(task.product?.key || '') !== productKey) {
+            throw Object.assign(new Error('1688 任务中不存在当前商品'), { status: 404 });
+          }
+          const schema = parse1688Schema(task.schema?.raw || task.schema);
+          const prepared = build1688PublishRequest({
+            schema,
+            catId: task.categoryId,
+            scene: task.scene,
+            formValues: task.product.formValues,
+          });
+          if (body.schemaHash !== prepared.schemaHash || task.schemaHash !== prepared.schemaHash) {
+            throw Object.assign(new Error('1688 商品发布规则已经变化，请重新读取规则并确认'), { status: 409 });
+          }
+          if (body.fingerprint !== prepared.fingerprint
+            || task.publication?.fingerprint !== prepared.fingerprint) {
+            throw Object.assign(new Error('1688 商品预览已经变化，请重新生成并确认'), { status: 409 });
+          }
+          if (!prepared.preflight.valid) {
+            throw Object.assign(new Error('1688 商品仍有缺失或不支持的必填字段'), {
+              status: 422,
+              code: 'PREFLIGHT_FAILED',
+            });
+          }
+          const publishing = {
+            ...begin1688Publication(task.publication, {
+              fingerprint: body.fingerprint,
+              schemaHash: body.schemaHash,
+              startedAt: nowIso(),
+            }),
+            cargoNumber: String(task.product.cargoNumber || ''),
+            categoryId: String(task.categoryId || ''),
+            title: String(task.product.title || task.product.formValues?.title || ''),
+          };
+          task = await update1688Task(rootDir, taskId, { ...task, publication: publishing }, task.version);
+          try {
+            const writeResult = await publish1688Product(body.config, {
+              catId: task.categoryId,
+              scene: task.scene,
+              dataBody: prepared.dataBody,
+              bizParam: task.bizParam,
+              productSourceChannels: task.productSourceChannels,
+            });
+            const pending = finish1688Publication(task.publication, writeResult, nowIso());
+            task = await update1688Task(rootDir, taskId, { ...task, publication: pending }, task.version);
+            const publication = await reconcile1688Publication(pending, {
+              getProduct: (id) => get1688Product(body.config, id),
+              listProducts: (params) => list1688Products(body.config, params),
+            }, nowIso());
+            task = await update1688Task(rootDir, taskId, { ...task, publication }, task.version);
+            sendJson(response, 200, { task, publication });
+          } catch (error) {
+            const publication = error.uncertain
+              ? mark1688PublicationUncertain(task.publication, error, nowIso())
+              : fail1688Publication(task.publication, error, nowIso());
+            task = await update1688Task(rootDir, taskId, { ...task, publication }, task.version);
+            sendJson(response, error.uncertain ? 202 : 422, { task, publication });
+          }
+        } finally {
+          write1688Lock = false;
+        }
+        return;
+      }
+
+      const reconcile1688Match = url.pathname.match(/^\/api\/1688\/publications\/([^/]+)\/reconcile$/);
+      if (request.method === 'POST' && reconcile1688Match) {
+        const body = await readJson(request);
+        const taskId = decodeURIComponent(reconcile1688Match[1]);
+        let task = await read1688Task(rootDir, taskId);
+        if (!['verify_pending', 'review_pending', 'uncertain'].includes(task.publication?.status)) {
+          throw Object.assign(new Error('当前 1688 发布记录不需要只读核验'), { status: 409 });
+        }
+        const publication = await reconcile1688Publication(task.publication, {
+          getProduct: (id) => get1688Product(body.config, id),
+          listProducts: (params) => list1688Products(body.config, params),
+        }, nowIso());
+        task = await update1688Task(rootDir, taskId, { ...task, publication }, task.version);
+        sendJson(response, 200, { task, publication });
         return;
       }
 
@@ -712,29 +1123,44 @@ export function createServer(options = {}) {
             error.stage = 'product-list';
             throw error;
           }
-          const publishing = beginPublicationAttempt(item, {
-            fingerprint: body.fingerprint,
-            baselineProductIds: (baseline.products || []).map((product) => product.productId),
-            expectedImageIds: item.expectedImageIds,
-            startedAt: nowIso(),
-          });
-          task = await updateObsidianDraftItem(rootDir, session.taskId, planId, publishing, task.version);
+          let publishing;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            task = await readObsidianPublishingTask(rootDir, session.taskId);
+            const currentItem = task.items.find((candidate) => candidate.planId === planId);
+            if (!currentItem) throw Object.assign(new Error('任务中不存在这个方案'), { status: 400 });
+            if (!['preview_ready', 'draft_created'].includes(currentItem.status)) {
+              throw Object.assign(new Error('当前状态不允许直接发布'), { status: 409 });
+            }
+            if (currentItem.fingerprint !== preview.fingerprint) {
+              throw Object.assign(new Error('预览已经变化，请重新生成并确认'), { status: 409 });
+            }
+            publishing = beginPublicationAttempt(currentItem, {
+              fingerprint: body.fingerprint,
+              baselineProductIds: (baseline.products || []).map((product) => product.productId),
+              expectedImageIds: currentItem.expectedImageIds,
+              startedAt: nowIso(),
+            });
+            try {
+              task = await updateObsidianDraftItem(
+                rootDir, session.taskId, planId, publishing, task.version,
+              );
+              break;
+            } catch (error) {
+              if (!isTaskVersionConflict(error) || attempt === 4) throw error;
+            }
+          }
+          let created;
           try {
-            const created = await createAlibabaProduct(body.config, {
+            created = await createAlibabaProduct(body.config, {
               schemaXml: preview.previewXml,
               publishContext: session.context,
             });
-            const reconciling = markPublicationReconciling(publishing, {
-              productId: created.productId,
-              traceId: created.traceId,
-              requestId: created.requestId,
-              nextCheckAt: nowIso(),
-            });
-            task = await updateObsidianDraftItem(rootDir, session.taskId, planId, reconciling, task.version);
           } catch (error) {
             if (error.definitive === true) {
               const rejected = rejectPublicationAttempt(publishing, error, nowIso());
-              task = await updateObsidianDraftItem(rootDir, session.taskId, planId, rejected, task.version);
+              task = await persistPublicationTransition(
+                session.taskId, planId, rejected, ['publishing'],
+              );
               sendJson(response, 422, {
                 error: rejected.errorMessage,
                 taskId: task.id,
@@ -747,7 +1173,20 @@ export function createServer(options = {}) {
               error,
               nextCheckAt: nowIso(),
             });
-            task = await updateObsidianDraftItem(rootDir, session.taskId, planId, reconciling, task.version);
+            task = await persistPublicationTransition(
+              session.taskId, planId, reconciling, ['publishing'],
+            );
+          }
+          if (created) {
+            const reconciling = markPublicationReconciling(publishing, {
+              productId: created.productId,
+              traceId: created.traceId,
+              requestId: created.requestId,
+              nextCheckAt: nowIso(),
+            });
+            task = await persistPublicationTransition(
+              session.taskId, planId, reconciling, ['publishing'],
+            );
           }
           const reconciled = await reconcileStoredPublication(body.config, session.taskId, planId);
           sendJson(response, reconciled.item.status === 'published_verified' ? 201 : 202, {
@@ -1073,7 +1512,10 @@ export function createServer(options = {}) {
 const currentFile = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === currentFile) {
   const port = Number(process.env.ICBU_WORKBENCH_PORT || 54025);
-  const server = createServer({ rootDir: process.cwd() });
+  const server = createServer({
+    rootDir: process.cwd(),
+    allow1688Writes: process.env.WORKBENCH_1688_ALLOW_WRITES === '1',
+  });
   server.listen(port, '127.0.0.1', () => {
     console.log(`国际站自动上品工作台：http://127.0.0.1:${port}/`);
   });

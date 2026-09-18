@@ -171,6 +171,12 @@ export function draftItemsFromPreviewResult(result = {}) {
   return Object.fromEntries(items.map((item) => [item.planId, item]));
 }
 
+export function publicationsForTask(publications = [], taskId = '') {
+  const currentTaskId = String(taskId || '').trim();
+  if (!currentTaskId) return [];
+  return publications.filter((record) => String(record?.taskId || '') === currentTaskId);
+}
+
 export function remainingPlans(batch, basePlanId) {
   if (!batch?.plans?.some((plan) => plan.id === basePlanId)) {
     throw new Error('请选择批次中的一个母商品方案');
@@ -556,6 +562,7 @@ export function initObsidianPublishing({
 
   function applyPublicationItemToCard(item) {
     if (!item?.planId) return;
+    if (item.taskId && !publicationsForTask([item], state.taskId).length) return;
     state.draftItems[item.planId] = item;
     const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(item.planId)}"]`);
     const button = card?.querySelector('.obsidian-publication-button');
@@ -569,13 +576,20 @@ export function initObsidianPublishing({
 
   const reconciliationTimers = new Map();
 
+  function clearPublicationReconciliationTimers() {
+    for (const timer of reconciliationTimers.values()) windowRef.clearTimeout(timer);
+    reconciliationTimers.clear();
+  }
+
   function schedulePublicationReconciliation(record) {
     if (!record?.taskId || !record?.planId
-      || !['reconciling', 'reconciliation_ambiguous'].includes(record.status)) return;
+      || !['reconciling', 'reconciliation_ambiguous'].includes(record.status)
+      || !publicationsForTask([record], state.taskId).length) return;
     const prior = reconciliationTimers.get(`${record.taskId}:${record.planId}`);
     if (prior) windowRef.clearTimeout(prior);
     const delay = Math.max(0, Date.parse(record.nextCheckAt || '') - Date.now()) || 1000;
     const timer = windowRef.setTimeout(async () => {
+      if (!publicationsForTask([record], state.taskId).length) return;
       try {
         const result = await requestJson('/api/obsidian/publication/reconcile', {
           method: 'POST',
@@ -583,7 +597,8 @@ export function initObsidianPublishing({
             config: getAlibabaConfig(), taskId: record.taskId, planId: record.planId,
           }),
         });
-        applyPublicationItemToCard(result.item);
+        if (!publicationsForTask([{ taskId: result.taskId }], state.taskId).length) return;
+        applyPublicationItemToCard({ ...result.item, taskId: result.taskId });
         schedulePublicationReconciliation({ ...result.item, taskId: result.taskId });
         text(elements.draftStatus, formatPublicationStatus(result.item));
       } catch (error) {
@@ -595,9 +610,10 @@ export function initObsidianPublishing({
 
   async function refreshPublications() {
     try {
+      clearPublicationReconciliationTimers();
       const result = await requestJson('/api/obsidian/publications');
       state.savedPublications = result.publications || [];
-      for (const record of state.savedPublications) {
+      for (const record of publicationsForTask(state.savedPublications, state.taskId)) {
         applyPublicationItemToCard(record);
         schedulePublicationReconciliation(record);
       }
@@ -1017,6 +1033,7 @@ export function initObsidianPublishing({
       state.sessionId = result.sessionId;
       state.taskId = result.taskId;
       state.draftItems = draftItemsFromPreviewResult(result);
+      clearPublicationReconciliationTimers();
       for (const preview of state.previews) {
         const card = elements.variants.querySelector(`[data-plan-id="${CSS.escape(preview.planId)}"]`);
         text(card?.querySelector('.obsidian-variant-status'), `完整预览通过 · ${preview.fingerprint.slice(0, 10)}`);
@@ -1033,6 +1050,11 @@ export function initObsidianPublishing({
           publicationButton.disabled = false;
           publicationButton.textContent = '直接正式发布此产品';
         }
+      }
+      for (const item of result.items || []) {
+        const record = { ...item, taskId: state.taskId };
+        applyPublicationItemToCard(record);
+        schedulePublicationReconciliation(record);
       }
       syncDraftSubmissionControls();
       setPreviewStatus(formatPreviewSuccess(state.previews.length), 'success');

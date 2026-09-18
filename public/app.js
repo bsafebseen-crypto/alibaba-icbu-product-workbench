@@ -13,6 +13,8 @@ import {
   summarizeDashboard,
 } from './product-pool.js';
 import { initObsidianPublishing } from './obsidian-publishing.js';
+import { init1688Publishing } from './1688-publishing.js';
+import { initKeywordRecords } from './keyword-records.js';
 
 const providerPresets = {
   openai: 'https://api.openai.com/v1',
@@ -128,6 +130,8 @@ function setBusy(button, busy, busyText) {
   button.disabled = busy;
 }
 
+const keywordRecordsController = initKeywordRecords({ requestJson });
+
 function switchModule(moduleName) {
   document.querySelectorAll('.module-link').forEach((button) => {
     const active = button.dataset.module === moduleName;
@@ -141,6 +145,7 @@ function switchModule(moduleName) {
     page.hidden = !active;
   });
   if (moduleName === 'product-pool' || moduleName === 'dashboard') loadProductPool();
+  if (moduleName === 'keyword-records') keywordRecordsController.load();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -1652,6 +1657,7 @@ initObsidianPublishing({
   getAlibabaConfig,
   getPhotobankGroupId: () => elements['ali-photobank-group'].value.trim(),
 });
+init1688Publishing({ requestJson });
 renderKeywords();
 renderEditor();
 loadProductPool();

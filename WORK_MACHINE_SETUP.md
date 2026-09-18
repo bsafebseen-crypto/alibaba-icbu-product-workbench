@@ -48,6 +48,7 @@ npm start
 
 - AI API Key
 - 阿里 App Secret、Access Token 和 Refresh Token
+- 1688 国内站独立的 App Secret、Access Token 和 Refresh Token
 - 浏览器本地存储
 - `data/tasks/` 中的本地任务
 - 商品图片、关键词表和其他本地素材
@@ -68,3 +69,5 @@ npm test
 ```
 
 修改后至少运行 `npm test`。阿里商品草稿、新增、修改或正式发布接口尚未开放；继续接入前必须保留逐件人工确认，并遵守 `AGENTS.md` 的安全红线。
+
+1688 模块的真实商品写入也默认关闭。新工作机先完成只读连接、类目 Schema、本地预检和 mock 测试；只有用户明确同意首次单商品联调时，才在当前 PowerShell 会话临时设置 `WORKBENCH_1688_ALLOW_WRITES=1`。不要把该开关、Secret 或 Token 写入仓库、启动脚本、日志或任务 JSON。

@@ -51,14 +51,14 @@ test('POST /api/alibaba/test forwards credentials without returning secrets', as
     const response = await fetch(`${baseUrl}/api/alibaba/test`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appKey: '511556', appSecret: 'secret', accessToken: 'token' }),
+      body: JSON.stringify({ appKey: '123456', appSecret: 'secret', accessToken: 'token' }),
     });
     const text = await response.text();
     assert.equal(response.status, 200);
     assert.equal(text.includes('secret'), false);
     assert.equal(text.includes('token'), false);
     assert.deepEqual(JSON.parse(text), { ok: true, message: 'stubbed' });
-    assert.equal(received.appKey, '511556');
+    assert.equal(received.appKey, '123456');
   }, {
     testAlibabaConnection: async (config) => {
       received = config;
@@ -73,7 +73,7 @@ test('POST /api/alibaba/token exchanges an authorization code', async () => {
     const response = await fetch(`${baseUrl}/api/alibaba/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: { appKey: '511556', appSecret: 'secret' }, code: 'auth-code' }),
+      body: JSON.stringify({ config: { appKey: '123456', appSecret: 'secret' }, code: 'auth-code' }),
     });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), {
@@ -96,13 +96,13 @@ test('POST /api/alibaba/token/refresh refreshes an existing token', async () => 
     const response = await fetch(`${baseUrl}/api/alibaba/token/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: { appKey: '511556', appSecret: 'secret' }, refreshToken: 'old' }),
+      body: JSON.stringify({ config: { appKey: '123456', appSecret: 'secret' }, refreshToken: 'old' }),
     });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { accessToken: 'renewed', refreshToken: 'rotated' });
   }, {
     refreshAlibabaToken: async (config, refreshToken) => {
-      assert.equal(config.appKey, '511556');
+      assert.equal(config.appKey, '123456');
       assert.equal(refreshToken, 'old');
       return { accessToken: 'renewed', refreshToken: 'rotated' };
     },
@@ -117,7 +117,7 @@ test('POST /api/alibaba/product-template loads a source product read-only', asyn
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        config: { appKey: '511556', appSecret: 'secret', accessToken: 'token' },
+        config: { appKey: '123456', appSecret: 'secret', accessToken: 'token' },
         productId: '1601915922577',
       }),
     });
@@ -155,7 +155,7 @@ test('POST /api/alibaba/photobank/upload decodes one local image and returns onl
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        config: { appKey: '511556', appSecret: 'secret', accessToken: 'token' },
+        config: { appKey: '123456', appSecret: 'secret', accessToken: 'token' },
         image: {
           fileName: 'main.jpg',
           dataUrl: 'data:image/jpeg;base64,AQID',
@@ -409,10 +409,16 @@ test('GET / serves the workbench page and client script', async () => {
     assert.match(html, /国际站自动上品/);
     const sidebar = html.match(/<nav class="module-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
     assert.deepEqual([...sidebar.matchAll(/data-module="([^"]+)"/g)].map((match) => match[1]), [
-      'obsidian-publishing', 'alibaba-settings',
+      'obsidian-publishing', 'keyword-records', '1688-publishing', 'alibaba-settings',
     ]);
     assert.match(sidebar, /data-module="obsidian-publishing"[^>]*aria-current="page"/);
     assert.match(html, /data-module="alibaba-settings"/);
+    assert.match(html, /data-module="1688-publishing"/);
+    assert.match(html, /id="module-1688-publishing"/);
+    assert.match(html, /id="1688-test"/);
+    assert.match(html, /id="1688-load-schema"/);
+    assert.match(html, /id="1688-preflight"/);
+    assert.match(html, /id="1688-publish"/);
     assert.match(html, /id="ali-authorize"/);
     assert.match(html, /id="ali-auth-code"/);
     assert.match(html, /id="ali-exchange"/);
@@ -469,6 +475,10 @@ test('GET / serves the workbench page and client script', async () => {
     const productPoolModule = await fetch(`http://127.0.0.1:${port}/product-pool.js`);
     assert.equal(productPoolModule.status, 200);
     assert.match(await productPoolModule.text(), /buildProductRows/);
+
+    const publishing1688Module = await fetch(`http://127.0.0.1:${port}/1688-publishing.js`);
+    assert.equal(publishing1688Module.status, 200);
+    assert.match(await publishing1688Module.text(), /init1688Publishing/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -1484,6 +1494,118 @@ test('POST /api/obsidian/publication publishes one fingerprint-bound plan after 
   });
 });
 
+test('POST /api/obsidian/publication retries a pre-submit task version conflict without duplicating the Alibaba write', async () => {
+  let publishCalls = 0;
+  let updateCalls = 0;
+  await withServer(async (baseUrl) => {
+    const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601', sourceProductType: 'sourcing', categoryId: '32905',
+          language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<source />',
+        },
+        sellingPointBinding, imagesByPlan: { 'variant-1': images },
+      }),
+    })).json();
+
+    const response = await fetch(`${baseUrl}/api/obsidian/publication`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' }, sessionId: prepared.sessionId,
+        planId: 'variant-1', fingerprint: 'hash-variant-1',
+      }),
+    });
+
+    assert.equal(response.status, 201);
+    assert.equal((await response.json()).item.status, 'published_verified');
+    assert.equal(publishCalls, 1);
+    assert.ok(updateCalls >= 4);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [{ id: 'variant-1', title: 'Exact title' }] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    listAlibabaProducts: async () => ({ products: [] }),
+    updateObsidianDraftItem: async (rootDir, taskId, planId, nextItem, expectedVersion) => {
+      updateCalls += 1;
+      const store = await import('../src/obsidian-task-store.js');
+      if (updateCalls === 1) {
+        const current = await store.readObsidianPublishingTask(rootDir, taskId);
+        await store.updateObsidianDraftItem(rootDir, taskId, planId, current.items[0], current.version);
+        throw Object.assign(new Error('任务状态已经变化，请刷新后重试'), { status: 409 });
+      }
+      return store.updateObsidianDraftItem(rootDir, taskId, planId, nextItem, expectedVersion);
+    },
+    createAlibabaProduct: async () => {
+      publishCalls += 1;
+      return { productId: '200', traceId: 'trace-200', requestId: 'request-200' };
+    },
+    reconcilePublication: async () => ({ kind: 'verified', productId: '200', candidateProductIds: ['200'] }),
+  });
+});
+
+test('POST /api/obsidian/publication preserves one Alibaba write when storing its result hits a task version conflict', async () => {
+  let publishCalls = 0;
+  let resultConflictInjected = false;
+  await withServer(async (baseUrl) => {
+    const images = Array.from({ length: 6 }, (_, index) => ({ fileId: `${index + 1}`, url: `https://img/${index + 1}` }));
+    const prepared = await (await fetch(`${baseUrl}/api/obsidian/preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        relativePath: 'batch.md', basePlanId: 'base', planIds: ['variant-1'],
+        sourceContext: {
+          sourceProductId: '1601', sourceProductType: 'sourcing', categoryId: '32905',
+          language: 'en_US', publishType: 'default', version: 'trade.1.1', schemaXml: '<source />',
+        },
+        sellingPointBinding, imagesByPlan: { 'variant-1': images },
+      }),
+    })).json();
+
+    const response = await fetch(`${baseUrl}/api/obsidian/publication`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        config: { appKey: 'key' }, sessionId: prepared.sessionId,
+        planId: 'variant-1', fingerprint: 'hash-variant-1',
+      }),
+    });
+
+    assert.equal(response.status, 201);
+    const body = await response.json();
+    assert.equal(body.item.status, 'published_verified');
+    assert.equal(body.item.publicationProductId, '200');
+    assert.equal(publishCalls, 1);
+    assert.equal(resultConflictInjected, true);
+  }, {
+    readObsidianBatch: async () => ({ batchId: 'batch', plans: [{ id: 'variant-1', title: 'Exact title' }] }),
+    createObsidianVariants: () => [{ planId: 'variant-1' }],
+    readSellingPointBinding: async () => sellingPointBinding,
+    validateSellingPointBinding: () => sellingPointBinding,
+    createStrictProductPreview: () => ({ previewXml: '<preview />', fingerprint: 'hash-variant-1', changedFields: ['title'] }),
+    getAlibabaPublishingCapability: async () => ({ supportPostSourcing: true }),
+    listAlibabaProducts: async () => ({ products: [] }),
+    updateObsidianDraftItem: async (rootDir, taskId, planId, nextItem, expectedVersion) => {
+      const store = await import('../src/obsidian-task-store.js');
+      if (nextItem.status === 'reconciling' && !resultConflictInjected) {
+        resultConflictInjected = true;
+        const current = await store.readObsidianPublishingTask(rootDir, taskId);
+        await store.updateObsidianDraftItem(rootDir, taskId, planId, current.items[0], current.version);
+        throw Object.assign(new Error('任务状态已经变化，请刷新后重试'), { status: 409 });
+      }
+      return store.updateObsidianDraftItem(rootDir, taskId, planId, nextItem, expectedVersion);
+    },
+    createAlibabaProduct: async () => {
+      publishCalls += 1;
+      return { productId: '200', traceId: 'trace-200', requestId: 'request-200' };
+    },
+    reconcilePublication: async () => ({ kind: 'verified', productId: '200', candidateProductIds: ['200'] }),
+  });
+});
+
 test('POST /api/obsidian/publication/preflight performs only read checks for one preview plan', async () => {
   let publishCalls = 0;
   let listInput;
@@ -1592,5 +1714,85 @@ test('GET publications and POST reconcile expose safe state and perform no write
     updateObsidianDraftItem: async (_root, _taskId, _planId, nextItem) => ({ id: 'task-1', version: 2, items: [nextItem] }),
     reconcilePublication: async () => ({ kind: 'verified', productId: '200', candidateProductIds: ['200'] }),
     createAlibabaProduct: async () => { publishCalls += 1; },
+  });
+});
+
+test('keyword record routes read and mutate Product IDs', async () => {
+  await withServer(async (baseUrl) => {
+    const empty = await fetch(`${baseUrl}/api/keyword-records`);
+    assert.equal(empty.status, 200);
+    assert.deepEqual(await empty.json(), {
+      products: [], inquiry_keywords: [], blocked_keywords: [],
+    });
+
+    const added = await fetch(`${baseUrl}/api/keyword-records/products`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: ' 1601954851686 ' }),
+    });
+    assert.equal(added.status, 201);
+    const data = await added.json();
+    assert.equal(data.products[0].product_id, '1601954851686');
+
+    const removed = await fetch(`${baseUrl}/api/keyword-records/products/${data.products[0].id}`, {
+      method: 'DELETE',
+    });
+    assert.equal(removed.status, 200);
+    assert.equal((await removed.json()).products.length, 0);
+  });
+});
+
+test('inquiry keyword routes support CRUD and batch deduplication', async () => {
+  await withServer(async (baseUrl) => {
+    await fetch(`${baseUrl}/api/keyword-records/products`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: '1601954851686' }),
+    });
+    const batch = await fetch(`${baseUrl}/api/keyword-records/inquiry/batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: '1601954851686',
+        keywords: 'reflective vest\nREFLECTIVE VEST\nhigh visibility vest',
+      }),
+    });
+    assert.equal(batch.status, 201);
+    const batchResult = await batch.json();
+    assert.deepEqual({ added: batchResult.added, skipped: batchResult.skipped }, { added: 2, skipped: 1 });
+
+    const record = batchResult.data.inquiry_keywords[0];
+    const patched = await fetch(`${baseUrl}/api/keyword-records/inquiry/${record.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword: 'reflective workwear', note: '重点' }),
+    });
+    assert.equal(patched.status, 200);
+    assert.equal((await patched.json()).inquiry_keywords[0].note, '重点');
+
+    const removed = await fetch(`${baseUrl}/api/keyword-records/inquiry/${record.id}`, { method: 'DELETE' });
+    assert.equal(removed.status, 200);
+    assert.equal((await removed.json()).inquiry_keywords.length, 1);
+  });
+});
+
+test('blocked keyword routes preserve nullable Product IDs and skip batch duplicates', async () => {
+  await withServer(async (baseUrl) => {
+    const batch = await fetch(`${baseUrl}/api/keyword-records/blocked/batch`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: '', keywords: 'fashion vest\nFASHION VEST\npet vest' }),
+    });
+    assert.equal(batch.status, 201);
+    const batchResult = await batch.json();
+    assert.deepEqual({ added: batchResult.added, skipped: batchResult.skipped }, { added: 2, skipped: 1 });
+    assert.equal(batchResult.data.blocked_keywords[0].product_id, null);
+
+    const record = batchResult.data.blocked_keywords[0];
+    const patched = await fetch(`${baseUrl}/api/keyword-records/blocked/${record.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: '1601954851686', keyword: 'fashion workwear', note: '不相关' }),
+    });
+    assert.equal(patched.status, 200);
+    assert.equal((await patched.json()).blocked_keywords[0].product_id, '1601954851686');
+
+    const removed = await fetch(`${baseUrl}/api/keyword-records/blocked/${record.id}`, { method: 'DELETE' });
+    assert.equal(removed.status, 200);
+    assert.equal((await removed.json()).blocked_keywords.length, 1);
   });
 });
