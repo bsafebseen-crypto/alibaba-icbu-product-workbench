@@ -33,6 +33,15 @@ GitHub 仓库只包含源代码、锁定依赖版本的 `package-lock.json`、�
 
 如果工作机使用不同端口，可在启动前设置 `ICBU_WORKBENCH_PORT`。默认端口为 `54025`，服务始终只监听本机地址。
 
+## 上品 Agent Skills
+
+仓库同时保存两个本地上品 Skill 的完整源码与测试：
+
+- [国际站图片选词发品](skills/generate-alibaba-listings/SKILL.md)
+- [1688 图片上品](skills/generate-1688-listings/SKILL.md)
+
+安装、默认路径、运行时依赖和验证说明见 [skills/README.md](skills/README.md)。
+
 ## 工作台模块
 
 工作台包含以下模块：

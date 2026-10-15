@@ -1,0 +1,4 @@
+interface:
+  display_name: "1688图片上品"
+  short_description: "根据产品图片生成1688中文上品方案并保存到Obsidian"
+  default_prompt: "使用 $generate-1688-listings 根据一套产品图片生成1688标题、型号、属性和规格预测，并保存为Obsidian Markdown。"
