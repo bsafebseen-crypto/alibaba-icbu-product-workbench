@@ -89,6 +89,7 @@ import {
 } from './publication-reconciliation.js';
 import {
   analyzeProductSchema as defaultAnalyzeProductSchema,
+  assertCustomAttributeValueLengths,
   createProductPreview as defaultCreateProductPreview,
 } from './schema-template.js';
 import {
@@ -1081,6 +1082,9 @@ export function createServer(options = {}) {
           if (body.fingerprint !== preview.fingerprint || item.fingerprint !== preview.fingerprint) {
             throw Object.assign(new Error('预览已经变化，请重新生成并确认'), { status: 409 });
           }
+          assertCustomAttributeValueLengths(
+            analyzeProductSchema(preview.previewXml).recognized.customAttributes?.items || [], planId,
+          );
           const currentStoredBinding = await readSellingPointBinding(rootDir, session.context);
           const currentBinding = currentStoredBinding
             ? validateSellingPointBinding(session.schemaXml, currentStoredBinding)
@@ -1171,6 +1175,9 @@ export function createServer(options = {}) {
             }
             const reconciling = markPublicationReconciling(publishing, {
               error,
+              productId: error.productId,
+              traceId: error.traceId,
+              requestId: error.requestId,
               nextCheckAt: nowIso(),
             });
             task = await persistPublicationTransition(

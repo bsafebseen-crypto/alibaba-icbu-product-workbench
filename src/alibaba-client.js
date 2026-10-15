@@ -484,11 +484,17 @@ export async function createAlibabaProduct(
   const result = body.alibaba_icbu_product_schema_add_response || body;
   const bizSuccess = result.biz_success === true || result.biz_success === 'true';
   if (!bizSuccess) {
+    const productId = String(result.product_id || '').trim();
     const error = new Error(result.message || '阿里明确返回正式发布失败');
     error.code = result.msg_code || '';
+    error.productId = /^\d+$/.test(productId) ? productId : '';
     error.traceId = result.trace_id || '';
     error.requestId = body.request_id || result.request_id || '';
-    error.definitive = result.biz_success === false || result.biz_success === 'false';
+    error.resultUncertain = Boolean(error.productId)
+      || String(error.code).includes('SYS_ERROR')
+      || String(error.message).includes('请稍后重试');
+    error.definitive = (result.biz_success === false || result.biz_success === 'false')
+      && !error.resultUncertain;
     throw error;
   }
   const productId = String(result.product_id || '').trim();

@@ -512,6 +512,36 @@ test('createAlibabaProduct marks explicit business rejection as definitive', asy
   );
 });
 
+test('createAlibabaProduct preserves a returned product id and treats SYS_ERROR as uncertain', async () => {
+  const fetchImpl = async () => ({
+    ok: true, status: 200,
+    async json() {
+      return {
+        alibaba_icbu_product_schema_add_response: {
+          biz_success: false,
+          msg_code: 'isp.system-service-error:SYS_ERROR;',
+          message: 'systemError:isp.system-service-error:SYS_ERROR:系统错误,请稍后重试:;',
+          product_id: '1601999000002',
+          trace_id: 'trace-system-error',
+        },
+      };
+    },
+  });
+
+  await assert.rejects(
+    () => createAlibabaProduct({
+      gatewayUrl: 'https://gateway.example.com', appKey: 'key', appSecret: 'secret', accessToken: 'token',
+    }, {
+      schemaXml: '<itemSchema />',
+      publishContext: { categoryId: '301504', language: 'en_US', publishType: 'default' },
+    }, fetchImpl, 1700000000000),
+    (error) => error.definitive === false
+      && error.resultUncertain === true
+      && error.productId === '1601999000002'
+      && error.code === 'isp.system-service-error:SYS_ERROR;',
+  );
+});
+
 test('listAlibabaProducts maps schema language and returns safe product summaries', async () => {
   let request;
   const fetchImpl = async (url, options) => {

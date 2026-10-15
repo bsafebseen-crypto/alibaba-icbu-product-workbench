@@ -2,6 +2,11 @@
 setlocal
 cd /d "%~dp0"
 
+rem Launch the main project when this entry point is used from a worktree.
+if exist ".git" if not exist ".git\config" (
+  if exist "..\..\.git\config" if exist "..\..\src\server.js" cd /d "..\.."
+)
+
 where node >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Node.js 20 or later is required.

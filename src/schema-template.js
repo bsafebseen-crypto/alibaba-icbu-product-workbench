@@ -181,19 +181,33 @@ function renumberIdentity(node, index) {
   }
 }
 
-function writeCustomAttributes(field, attributes) {
+export function assertCustomAttributeValueLengths(attributes, planId = '') {
+  // The formal API enforces this limit even when the rendered Schema omits it.
+  attributes.forEach((attribute, index) => {
+    const value = String(attribute?.value || '').trim();
+    if (value.length > 70) {
+      throw Object.assign(new Error(`${planId ? `${planId} ` : ''}自定义属性 ${index + 1}「${attribute.name}」值为 ${value.length} 个字符，超过阿里允许的 70 个字符；请缩短后重新生成完整预览`), { status: 400 });
+    }
+  });
+}
+
+function writeCustomAttributes(field, attributes, planId) {
   if (!Array.isArray(attributes) || !attributes.length) {
     throw new Error('自定义属性至少需要保留 1 项');
   }
+  const normalized = attributes.map((attribute) => {
+    const name = String(attribute?.name || '').trim();
+    const value = String(attribute?.value || '').trim();
+    if (!name || !value) throw new Error('自定义属性名和值不能为空');
+    return { name, value };
+  });
+  assertCustomAttributeValueLengths(normalized, planId);
   const renderedContainer = field?.['complex-value'];
   const renderedRows = asArray(renderedContainer?.field)
     .filter((row) => /^custommoreproperty\d+$/.test(normalizeIdentity(row?.['@_id'])));
   if (renderedContainer && renderedRows.length) {
     const templateRow = renderedRows[0];
-    renderedContainer.field = attributes.map((attribute, index) => {
-      const name = String(attribute?.name || '').trim();
-      const value = String(attribute?.value || '').trim();
-      if (!name || !value) throw new Error('自定义属性名和值不能为空');
+    renderedContainer.field = normalized.map(({ name, value }, index) => {
       const row = structuredClone(templateRow);
       const parts = collectAttributeParts(row);
       const namePart = parts.find((part) => part.kind === 'name');
@@ -211,10 +225,7 @@ function writeCustomAttributes(field, attributes) {
   const templateRow = collectComplexRows(field)[0];
   if (!container || !templateRow) throw new Error('Schema 缺少可安全替换的自定义属性结构');
 
-  container['complex-value'] = attributes.map((attribute, index) => {
-    const name = String(attribute?.name || '').trim();
-    const value = String(attribute?.value || '').trim();
-    if (!name || !value) throw new Error('自定义属性名和值不能为空');
+  container['complex-value'] = normalized.map(({ name, value }, index) => {
     const row = structuredClone(templateRow);
     const parts = collectAttributeParts(row);
     const namePart = parts.find((part) => part.kind === 'name');
@@ -465,7 +476,7 @@ export function createProductPreview(schemaXml, variant = {}) {
 
   const changedFields = ['title', 'productSummary', 'faq'];
   if (Array.isArray(variant.customAttributes)) {
-    writeCustomAttributes(roleFields.customAttributes, variant.customAttributes);
+    writeCustomAttributes(roleFields.customAttributes, variant.customAttributes, variant.planId);
     changedFields.push('customAttributes');
   }
   if (variant.alibabaImages !== undefined) {

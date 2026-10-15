@@ -82,3 +82,19 @@ test('createStrictProductPreview requires six complete photo-bank images', () =>
     /必须正好包含 1 张主图和 5 张副图/,
   );
 });
+
+test('createStrictProductPreview rejects the actual oversized size reference with its plan and field', () => {
+  const variant = createObsidianVariants(listingBatch(), 'plan-1')[0];
+  const value = 'M L XL 2XL 3XL shown in the image guide with final measurements to confirm';
+  variant.customAttributes[9] = { name: 'Size Reference', value };
+  const alibabaImages = Array.from({ length: 6 }, (_, index) => ({
+    fileId: `new-${index}`, url: `https://img/new-${index}.jpg`,
+  }));
+
+  assert.equal(value.length, 74);
+  assert.throws(
+    () => createStrictProductPreview(schemaXml, { ...variant, alibabaImages }),
+    /plan-2.*自定义属性 10.*Size Reference.*74.*70/,
+  );
+  assert.equal(variant.customAttributes[9].value, value);
+});

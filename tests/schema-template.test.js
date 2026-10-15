@@ -178,6 +178,25 @@ const confirmedSellingPointBinding = {
   structureType: 'single-text',
 };
 
+for (const [shape, xml] of [['generic', schemaXml], ['Alibaba rendered', renderedAlibabaSchemaXml]]) {
+  test(`createProductPreview validates the 70-character custom value boundary in ${shape} Schema`, () => {
+    const variant = {
+      title: 'Safety Vest', sellingPoints: 'Summary',
+      faqItems: Array.from({ length: 5 }, () => ({ question: 'Question?', answer: 'Answer.' })),
+      customAttributes: [{ name: 'Size Reference', value: 'x'.repeat(70) }],
+      ...(shape === 'Alibaba rendered' ? { sellingPointBinding: confirmedSellingPointBinding } : {}),
+    };
+    const preview = createProductPreview(xml, variant);
+    assert.deepEqual(analyzeProductSchema(preview.previewXml).recognized.customAttributes.items, [
+      { name: 'Size Reference', value: 'x'.repeat(70) },
+    ]);
+
+    variant.customAttributes[0].value = 'x'.repeat(71);
+    assert.throws(() => createProductPreview(xml, variant), /Size Reference.*71.*70/);
+    assert.equal(variant.customAttributes[0].value.length, 71);
+  });
+}
+
 test('analyzeProductSchema reads real Alibaba render value nodes instead of rule hints', () => {
   const analysis = analyzeProductSchema(renderedAlibabaSchemaXml);
 

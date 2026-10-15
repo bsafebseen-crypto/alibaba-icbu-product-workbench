@@ -144,7 +144,16 @@ test('formal publication statuses clearly prohibit uncertain retries', () => {
   assert.equal(formatPublicationStatus({ status: 'reconciling' }), '正在自动核验发布结果，禁止重复提交');
   assert.equal(formatPublicationStatus({ status: 'reconciliation_ambiguous' }), '正在自动辨认发布结果，禁止重复提交');
   assert.equal(formatPublicationStatus({ status: 'reconciliation_unresolved' }), '自动核验未能唯一确认，已禁止重复发布');
-  assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: 'bad field' }), '阿里明确拒绝：bad field');
+  assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: 'bad field' }), '正式发布未通过 · 请查看下方原因');
+});
+
+test('custom attribute length errors explain the actual value and limit without the API wrapper', () => {
+  const value = 'M L XL 2XL 3XL shown in the image guide with final measurements to confirm';
+  const message = `systemError:isp.system-service-error:PUB_BIZCHECK_PROPERTY_CUSTOM_VALUE_LENGTH_LIMIT:70 characters max : ${value}:;`;
+  assert.equal(formatAlibabaRequestError({ message }),
+    `自定义属性值超过阿里限制：最多 70 个字符，当前 74 个（${value}）。请缩短后重新生成完整预览。`);
+  assert.equal(formatPublicationStatus({ status: 'publish_rejected', errorMessage: message }),
+    '正式发布未通过 · 请查看下方原因');
 });
 
 test('saved publication records never cross from another task with the same plan id', () => {

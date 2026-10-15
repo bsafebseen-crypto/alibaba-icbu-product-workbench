@@ -145,17 +145,24 @@ export function formatPublicationStatus(item = {}) {
   if (item.status === 'reconciling') return '正在自动核验发布结果，禁止重复提交';
   if (item.status === 'reconciliation_ambiguous') return '正在自动辨认发布结果，禁止重复提交';
   if (item.status === 'reconciliation_unresolved') return '自动核验未能唯一确认，已禁止重复发布';
-  if (item.status === 'publish_rejected') return `阿里明确拒绝：${item.errorMessage || '请查看接口提示'}`;
+  if (item.status === 'publish_rejected') return '正式发布未通过 · 请查看下方原因';
   if (item.status === 'publishing') return '正在正式发布，禁止重复提交';
   return '';
 }
 
 export function formatAlibabaRequestError(error = {}) {
+  let message = error.message || '阿里接口请求失败';
+  if (message.includes('PUB_BIZCHECK_PROPERTY_CUSTOM_VALUE_LENGTH_LIMIT')) {
+    const match = message.match(/(\d+)\s+characters\s+max\s*:\s*(.*?):;\s*$/i);
+    message = match
+      ? `自定义属性值超过阿里限制：最多 ${match[1]} 个字符，当前 ${match[2].length} 个（${match[2]}）。请缩短后重新生成完整预览。`
+      : '自定义属性值超过阿里长度限制，请缩短后重新生成完整预览。';
+  }
   const details = [];
   if (error.stage) details.push(`阶段 ${error.stage}`);
   if (error.code || error.subCode) details.push(`错误 ${[error.code, error.subCode].filter(Boolean).join(' / ')}`);
   if (error.requestId) details.push(`Request ID ${error.requestId}`);
-  return `${error.message || '阿里接口请求失败'}${details.length ? `（${details.join('；')}）` : ''}`;
+  return `${message}${details.length ? `（${details.join('；')}）` : ''}`;
 }
 
 export function canSubmitPublication(item, writeLocked) {
@@ -572,6 +579,17 @@ export function initObsidianPublishing({
       button.disabled = item.status !== 'preview_ready';
     }
     if (message) text(card?.querySelector('.obsidian-variant-status'), message);
+    let errorNote = card?.querySelector('.obsidian-publication-error');
+    if (card && item.status === 'publish_rejected') {
+      if (!errorNote) {
+        errorNote = documentRef.createElement('p');
+        errorNote.className = 'obsidian-publication-error';
+        card.append(errorNote);
+      }
+      text(errorNote, formatAlibabaRequestError({
+        message: item.errorMessage || '请查看接口提示', requestId: item.requestId,
+      }));
+    } else errorNote?.remove();
   }
 
   const reconciliationTimers = new Map();

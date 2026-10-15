@@ -478,11 +478,13 @@ body::before { display: none; }
 .obsidian-variant-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; padding: 18px; }
 .obsidian-variant-list > p { grid-column: 1 / -1; margin: 0; color: var(--muted); font-size: 10px; }
 .obsidian-variant-card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfe; }
-.obsidian-variant-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.obsidian-variant-heading { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.obsidian-variant-heading > div { flex: 1 1 260px; min-width: 0; }
 .obsidian-variant-heading strong, .obsidian-variant-heading small { display: block; }
 .obsidian-variant-heading strong { font-size: 10px; line-height: 1.55; }
 .obsidian-variant-heading small { margin-top: 4px; color: var(--muted); font-size: 8px; }
-.obsidian-variant-status { flex: 0 0 auto; padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; }
+.obsidian-variant-status { flex: 0 1 auto; max-width: 100%; overflow-wrap: anywhere; padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 8px; }
+.obsidian-publication-error { margin: 10px 0 0; color: #a73f32; font-size: 9px; line-height: 1.6; overflow-wrap: anywhere; }
 .obsidian-image-picker { display: grid; gap: 6px; margin-top: 12px; padding: 10px; border: 1px dashed var(--line-strong); border-radius: 5px; background: white; }
 .obsidian-image-picker input { max-width: 100%; font-size: 9px; }
 .obsidian-image-picker span, .obsidian-variant-card details { color: var(--muted); font-size: 8px; }
