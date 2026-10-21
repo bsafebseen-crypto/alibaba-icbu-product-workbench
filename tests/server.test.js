@@ -310,8 +310,14 @@ test('GET /api/health reports a local healthy service', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/health`);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(await response.json(), { ok: true, background: false });
   });
+});
+
+test('GET /api/health identifies an independently launched background service', async () => {
+  await withServer(async (baseUrl) => {
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/health`)).json(), { ok: true, background: true });
+  }, { background: true });
 });
 
 test('POST /api/products/manual returns exactly five editable products', async () => {
@@ -536,6 +542,17 @@ test('POST /api/obsidian/batch returns 400 for an unsafe path', async () => {
       throw new Error('文件必须位于 Obsidian 发品目录内');
     },
   });
+});
+
+test('GET /local-service.js serves the connection monitor as an uncached browser module', async () => {
+  const rootDir = fileURLToPath(new URL('..', import.meta.url));
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/local-service.js`);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type'), /text\/javascript/);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(await response.text(), await readFile(path.join(rootDir, 'public/local-service.js'), 'utf8'));
+  }, { rootDir });
 });
 
 test('GET / exposes the Obsidian publishing module and its browser controller', async () => {
@@ -1210,7 +1227,17 @@ test('POST /api/obsidian/draft serializes creation across plans in one preview s
     assert.match((await secondResponse.json()).error, /另一份草稿正在创建并核验/);
     assert.equal(draftCalls, 1);
 
-    releaseFirstDraft();
+    try {
+      const stopResponse = await fetch(`${baseUrl}/api/workbench/stop`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-workbench-control': 'stop' },
+        body: '{"confirmed":true}',
+      });
+      assert.equal(stopResponse.status, 409);
+      assert.match((await stopResponse.json()).error, /商品正在写入/);
+      assert.equal((await fetch(`${baseUrl}/api/health`)).status, 200);
+    } finally {
+      releaseFirstDraft();
+    }
     const firstResponse = await firstResponsePromise;
     assert.equal(firstResponse.status, 201);
   }, {

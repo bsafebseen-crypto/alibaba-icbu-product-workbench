@@ -38,6 +38,16 @@ function batch() {
   return { plans: Array.from({ length: 5 }, (_, index) => ({ id: `plan-${index + 1}` })) };
 }
 
+test('a disconnected publish request is not mislabeled as an Alibaba rejection or confirmed failure', () => {
+  assert.equal(publishingUi.formatPublicationRequestFailure?.({ localServiceUnavailable: true }),
+    '连接中断 · 发布结果未确认');
+  assert.equal(publishingUi.formatPublicationRequestFailure?.({ status: 409 }),
+    '发布请求未完成 · 查看提示');
+  assert.equal(publishingUi.formatPublicationRequestFailure?.({
+    item: { status: 'reconciling' },
+  }), '正在自动核验发布结果，禁止重复提交');
+});
+
 test('bulk main-image selection maps shuffled numeric filenames to the remaining plan ids', () => {
   const files = ['5.jpg', '2.png', '1.webp', '4.jpeg', '3.jpg'].map((name) => ({ name }));
 

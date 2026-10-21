@@ -113,6 +113,7 @@ import {
   saveTask,
 } from './task-store.js';
 import { createKeywordRecordStore } from './keyword-record-store.js';
+import { installRuntimeDiagnostics } from './runtime-diagnostics.js';
 
 const BODY_LIMIT = 10 * 1024 * 1024;
 const IMAGE_GENERATION_BODY_LIMIT = 24 * 1024 * 1024;
@@ -132,6 +133,7 @@ async function serveStatic(rootDir, pathname, response) {
     '/': ['index.html', 'text/html; charset=utf-8'],
     '/styles.css': ['styles.css', 'text/css; charset=utf-8'],
     '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
+    '/local-service.js': ['local-service.js', 'text/javascript; charset=utf-8'],
     '/similar-product-ui.js': ['similar-product-ui.js', 'text/javascript; charset=utf-8'],
     '/product-pool.js': ['product-pool.js', 'text/javascript; charset=utf-8'],
     '/obsidian-publishing.js': ['obsidian-publishing.js', 'text/javascript; charset=utf-8'],
@@ -309,12 +311,14 @@ export function createServer(options = {}) {
   const previewSessions = new Map();
   let productWriteLock = null;
   let write1688Lock = false;
+  let shuttingDown = false;
 
   function nowIso() {
     return new Date(nowMs()).toISOString();
   }
 
   function acquireProductWrite(kind, taskId, planId) {
+    if (shuttingDown) throw Object.assign(new Error('工作台正在停止，未提交商品'), { status: 503 });
     const now = nowMs();
     if (productWriteLock && (productWriteLock.active || productWriteLock.releaseAt > now)) {
       const message = kind === 'draft'
@@ -410,12 +414,34 @@ export function createServer(options = {}) {
     return { task, item: nextItem };
   }
 
-  return http.createServer(async (request, response) => {
-    const url = new URL(request.url, 'http://127.0.0.1');
-
+  const server = http.createServer(async (request, response) => {
     try {
+      let url;
+      try {
+        url = new URL(request.url, 'http://127.0.0.1');
+      } catch {
+        throw Object.assign(new Error('请求地址格式无效'), { status: 400 });
+      }
+      if (shuttingDown) throw Object.assign(new Error('工作台正在停止'), { status: 503 });
+      if (request.method === 'POST' && url.pathname === '/api/workbench/stop') {
+        if (request.headers['x-workbench-control'] !== 'stop' || request.headers.origin) {
+          throw Object.assign(new Error('只允许本机停止脚本发起此操作'), { status: 403 });
+        }
+        const body = await readJson(request);
+        if (body.confirmed !== true) {
+          throw Object.assign(new Error('停止工作台前必须明确确认'), { status: 400 });
+        }
+        if (write1688Lock || (productWriteLock
+          && (productWriteLock.active || productWriteLock.releaseAt > nowMs()))) {
+          throw Object.assign(new Error('商品正在写入或处于安全间隔，请等待完成后再停止'), { status: 409 });
+        }
+        shuttingDown = true;
+        response.once('finish', () => server.close());
+        sendJson(response, 200, { ok: true, stopping: true });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/api/health') {
-        sendJson(response, 200, { ok: true });
+        sendJson(response, 200, { ok: true, background: options.background === true });
         return;
       }
 
@@ -624,6 +650,7 @@ export function createServer(options = {}) {
             capability?.message || '当前 1688 应用尚未具备商品发布权限',
           ), { status: 403, code: capability?.code });
         }
+        if (shuttingDown) throw Object.assign(new Error('工作台正在停止，未提交商品'), { status: 503 });
         if (write1688Lock) {
           throw Object.assign(new Error('另一件 1688 商品正在发布或核验，请稍后再试'), { status: 409 });
         }
@@ -1514,16 +1541,22 @@ export function createServer(options = {}) {
       }).filter(([, value]) => value !== undefined && value !== '')));
     }
   });
+  return server;
 }
 
 const currentFile = fileURLToPath(import.meta.url);
 if (process.argv[1] && path.resolve(process.argv[1]) === currentFile) {
+  const diagnostics = installRuntimeDiagnostics(process.cwd());
   const port = Number(process.env.ICBU_WORKBENCH_PORT || 54025);
   const server = createServer({
     rootDir: process.cwd(),
+    background: process.env.ICBU_WORKBENCH_BACKGROUND === '1',
     allow1688Writes: process.env.WORKBENCH_1688_ALLOW_WRITES === '1',
   });
+  server.on('close', () => diagnostics.record('server_closed'));
   server.listen(port, '127.0.0.1', () => {
+    diagnostics.record('listening', { port: server.address().port });
     console.log(`国际站自动上品工作台：http://127.0.0.1:${port}/`);
+    console.log('运行诊断日志：data/runtime/server.log');
   });
 }

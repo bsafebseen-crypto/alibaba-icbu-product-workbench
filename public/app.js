@@ -15,6 +15,7 @@ import {
 import { initObsidianPublishing } from './obsidian-publishing.js';
 import { init1688Publishing } from './1688-publishing.js';
 import { initKeywordRecords } from './keyword-records.js';
+import { initLocalServiceConnection } from './local-service.js';
 
 const providerPresets = {
   openai: 'https://api.openai.com/v1',
@@ -106,19 +107,7 @@ function setStatus(element, message, type = '') {
   if (type) element.classList.add(type);
 }
 
-async function requestJson(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(body.error || `请求失败（HTTP ${response.status}）`);
-    Object.assign(error, body, { status: response.status });
-    throw error;
-  }
-  return body;
-}
+const { requestJson } = initLocalServiceConnection();
 
 function setBusy(button, busy, busyText) {
   if (busy) {
@@ -1665,14 +1654,3 @@ new MutationObserver(() => {
   elements['top-alibaba-state'].textContent = elements['ali-active-state'].textContent;
 }).observe(elements['ali-active-state'], { childList: true, characterData: true, subtree: true });
 elements['top-alibaba-state'].textContent = elements['ali-active-state'].textContent;
-requestJson('/api/health')
-  .then(() => {
-    elements['service-state'].classList.add('connected');
-    elements['service-state'].lastElementChild.textContent = '本地服务已连接';
-    elements['top-local-state'].textContent = '已连接';
-    elements['top-local-state'].closest('.top-state').classList.add('connected');
-  })
-  .catch(() => {
-    elements['service-state'].lastElementChild.textContent = '本地服务未连接';
-    elements['top-local-state'].textContent = '未连接';
-  });

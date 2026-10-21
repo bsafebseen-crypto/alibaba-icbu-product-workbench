@@ -41,13 +41,11 @@ if errorlevel 1 (
 )
 
 :start_workbench
-echo Starting Alibaba ICBU Product Workbench...
-echo URL: http://127.0.0.1:54025/
-echo Close this window to stop the workbench.
-
-start "" /b powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Milliseconds 900; Start-Process 'http://127.0.0.1:54025/'"
-node src\server.js
-
-echo.
-echo Workbench stopped.
-pause
+echo Starting Alibaba ICBU Product Workbench in the background...
+node scripts\workbench-launcher.mjs start
+if errorlevel 1 (
+  echo [ERROR] Workbench startup failed. See data\runtime\server.log.
+  pause
+  exit /b 1
+)
+exit /b 0

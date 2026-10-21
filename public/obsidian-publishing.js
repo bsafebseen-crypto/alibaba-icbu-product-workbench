@@ -150,6 +150,13 @@ export function formatPublicationStatus(item = {}) {
   return '';
 }
 
+export function formatPublicationRequestFailure(error = {}) {
+  if (error.item) return formatPublicationStatus(error.item);
+  return error.localServiceUnavailable
+    ? '连接中断 · 发布结果未确认'
+    : '发布请求未完成 · 查看提示';
+}
+
 export function formatAlibabaRequestError(error = {}) {
   let message = error.message || '阿里接口请求失败';
   if (message.includes('PUB_BIZCHECK_PROPERTY_CUSTOM_VALUE_LENGTH_LIMIT')) {
@@ -1113,9 +1120,7 @@ export function initObsidianPublishing({
           result.item.status === 'published_verified' ? 'success' : '');
       } catch (error) {
         if (error.item) applyPublicationItemToCard(error.item);
-        publicationButton.textContent = error.item
-          ? formatPublicationStatus(error.item)
-          : '正式发布失败 · 查看提示';
+        publicationButton.textContent = formatPublicationRequestFailure(error);
         text(elements.draftStatus, formatAlibabaRequestError(error));
       } finally {
         finishDraftSubmission(state, planId);
