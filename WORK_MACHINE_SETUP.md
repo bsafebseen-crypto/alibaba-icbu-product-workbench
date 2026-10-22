@@ -7,7 +7,7 @@
 - Git
 - Node.js 20 或更高版本（自带 npm）
 - 能访问 GitHub 和 npm 软件源的网络
-- 已登录有权访问私有仓库 `bsafebseen-crypto/alibaba-icbu-product-workbench` 的 GitHub 工作账号
+- 仓库 `bsafebseen-crypto/alibaba-icbu-product-workbench` 当前公开，只下载代码无需 GitHub 登录；提交或推送修改需要有写权限的工作账号
 
 Python 目前不是项目依赖。
 
@@ -18,7 +18,7 @@ git clone https://github.com/bsafebseen-crypto/alibaba-icbu-product-workbench.gi
 cd alibaba-icbu-product-workbench
 ```
 
-私有仓库首次克隆时，Git 可能打开浏览器要求登录 GitHub。请使用工作账号完成授权，不要输入 GitHub 账号密码作为 Git 密码。
+如后续推送时 Git 要求登录，请使用有写权限的工作账号完成授权，不要输入 GitHub 账号密码作为 Git 密码。
 
 ## 3. 安装并验证
 
@@ -53,6 +53,8 @@ npm start
 - 1688 国内站独立的 App Secret、Access Token 和 Refresh Token
 - 浏览器本地存储
 - `data/tasks/` 中的本地任务
+- `data/keyword-records.json` 中的询盘词与直通车屏蔽词记录
+- Obsidian 批次 Markdown（默认目录 `C:\obsidian\obsidian\国际站发品`）
 - 商品图片、关键词表和其他本地素材
 - `.env`、日志和临时文件
 
@@ -70,6 +72,6 @@ npm ci
 npm test
 ```
 
-修改后至少运行 `npm test`。阿里商品草稿、新增、修改或正式发布接口尚未开放；继续接入前必须保留逐件人工确认，并遵守 `AGENTS.md` 的安全红线。
+修改后至少运行 `npm test`。Obsidian 模块已支持受预览指纹、持久化状态和全局写锁保护的逐商品草稿创建与正式发布；这不代表允许接手 Agent 自动发品或使用真实写接口验收。保留逐商品人工确认，不新增商品更新、上下架、删除或库存修改调用，并遵守 `AGENTS.md` 的安全红线；超时或结果不明确时只能只读核验，禁止重发。
 
 1688 模块的真实商品写入也默认关闭。新工作机先完成只读连接、类目 Schema、本地预检和 mock 测试；只有用户明确同意首次单商品联调时，才在当前 PowerShell 会话临时设置 `WORKBENCH_1688_ALLOW_WRITES=1`。不要把该开关、Secret 或 Token 写入仓库、启动脚本、日志或任务 JSON。
