@@ -113,6 +113,7 @@ import {
   saveTask,
 } from './task-store.js';
 import { createKeywordRecordStore } from './keyword-record-store.js';
+import { createImageToolsService } from './image-tools.js';
 import { installRuntimeDiagnostics } from './runtime-diagnostics.js';
 
 const BODY_LIMIT = 10 * 1024 * 1024;
@@ -139,6 +140,7 @@ async function serveStatic(rootDir, pathname, response) {
     '/obsidian-publishing.js': ['obsidian-publishing.js', 'text/javascript; charset=utf-8'],
     '/1688-publishing.js': ['1688-publishing.js', 'text/javascript; charset=utf-8'],
     '/keyword-records.js': ['keyword-records.js', 'text/javascript; charset=utf-8'],
+    '/image-tools.js': ['image-tools.js', 'text/javascript; charset=utf-8'],
     '/shared-image-assignment.js': ['shared-image-assignment.js', 'text/javascript; charset=utf-8'],
   };
   const entry = files[pathname];
@@ -177,6 +179,21 @@ async function readJson(request, limit = BODY_LIMIT) {
     return JSON.parse(raw);
   } catch {
     throw Object.assign(new Error('请求内容不是有效 JSON'), { status: 400 });
+  }
+}
+
+function requireImageToolsRequest(request) {
+  const port = request.socket.localPort;
+  const host = request.headers.host;
+  const localHosts = [`127.0.0.1:${port}`, `localhost:${port}`];
+  if (!localHosts.includes(host) || request.headers['x-image-tools'] !== '1'
+    || (request.headers.origin && request.headers.origin !== `http://${host}`)
+    || request.headers['sec-fetch-site'] === 'cross-site') {
+    throw Object.assign(new Error('图片工具只接受当前本地工作台发起的请求'), { status: 403 });
+  }
+  if (request.method === 'POST'
+    && !/^application\/json(?:\s*;|$)/i.test(request.headers['content-type'] || '')) {
+    throw Object.assign(new Error('图片工具请求必须使用 JSON'), { status: 415 });
   }
 }
 
@@ -223,6 +240,7 @@ function decode1688ImageDataUrl(dataUrl) {
 export function createServer(options = {}) {
   const rootDir = path.resolve(options.rootDir ?? process.cwd());
   const keywordRecordStore = options.keywordRecordStore ?? createKeywordRecordStore(rootDir);
+  const imageTools = options.imageTools ?? createImageToolsService();
   const testAiConnection = options.testAiConnection ?? defaultTestAiConnection;
   const testAlibabaConnection = options.testAlibabaConnection ?? defaultTestAlibabaConnection;
   const exchangeAlibabaCode = options.exchangeAlibabaCode ?? defaultExchangeAlibabaCode;
@@ -431,6 +449,9 @@ export function createServer(options = {}) {
         if (body.confirmed !== true) {
           throw Object.assign(new Error('停止工作台前必须明确确认'), { status: 400 });
         }
+        if (imageTools.isBusy()) {
+          throw Object.assign(new Error('图片正在处理，请等待完成后再停止工作台'), { status: 409 });
+        }
         if (write1688Lock || (productWriteLock
           && (productWriteLock.active || productWriteLock.releaseAt > nowMs()))) {
           throw Object.assign(new Error('商品正在写入或处于安全间隔，请等待完成后再停止'), { status: 409 });
@@ -443,6 +464,32 @@ export function createServer(options = {}) {
       if (request.method === 'GET' && url.pathname === '/api/health') {
         sendJson(response, 200, { ok: true, background: options.background === true });
         return;
+      }
+
+      if (url.pathname.startsWith('/api/image-tools/')) {
+        requireImageToolsRequest(request);
+        if (request.method === 'GET' && url.pathname === '/api/image-tools/state') {
+          sendJson(response, 200, await imageTools.getState());
+          return;
+        }
+        if (request.method === 'POST') {
+          const body = await readJson(request, 16 * 1024);
+          if (!body || typeof body !== 'object' || Array.isArray(body)) {
+            throw Object.assign(new Error('图片工具请求必须是 JSON 对象'), { status: 400 });
+          }
+          if (url.pathname === '/api/image-tools/select') {
+            sendJson(response, 200, await imageTools.selectFolder());
+            return;
+          }
+          if (url.pathname === '/api/image-tools/start') {
+            sendJson(response, 202, await imageTools.start(body.selectionId));
+            return;
+          }
+          if (url.pathname === '/api/image-tools/open') {
+            sendJson(response, 200, await imageTools.openFolder(body.selectionId));
+            return;
+          }
+        }
       }
 
       if (request.method === 'GET' && url.pathname === '/api/keyword-records') {

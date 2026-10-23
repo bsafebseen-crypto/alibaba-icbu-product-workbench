@@ -526,6 +526,16 @@ body::before { display: none; }
 .publishing-1688-image-list span { padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; background: #fbfcfe; color: var(--muted); font-size: 9px; overflow-wrap: anywhere; }
 .publishing-1688-panel > p:not(.inline-status) { margin: 0; padding: 18px; color: var(--muted); font-size: 10px; line-height: 1.7; }
 
+.image-tools-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; padding: 18px 18px 14px; }
+.image-tools-controls label { display: grid; gap: 7px; min-width: 0; color: var(--muted); font-size: 10px; font-weight: 700; }
+.image-tools-controls input { width: 100%; min-width: 0; min-height: 38px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface-soft); color: var(--ink); }
+.image-tools-actions { display: flex; gap: 10px; padding: 0 18px 18px; }
+.image-tools-results { margin-top: 14px; }
+.image-tools-results .obsidian-status { min-height: 88px; padding: 18px; font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
+.image-tools-results ul { margin: 0 18px 18px; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: 5px; }
+.image-tools-results li { padding: 10px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.image-tools-results li:last-child { border-bottom: 0; }
+
 .keyword-local-badge { padding: 7px 10px; border: 1px solid #cbd8d3; border-radius: 999px; background: #f2f8f5; color: #28705a; font-size: 9px; font-weight: 700; }
 .keyword-record-panel { overflow: hidden; }
 .keyword-record-tabs { display: flex; gap: 4px; padding: 14px 18px 0; border-bottom: 1px solid var(--line); }
@@ -620,6 +630,8 @@ body::before { display: none; }
   .keyword-product-panel { border-right: 0; border-bottom: 1px solid var(--line); }
   .keyword-detail-title, .keyword-toolbar-actions { align-items: stretch; flex-direction: column; }
   .keyword-blocked-toolbar { grid-template-columns: 1fr; }
+  .image-tools-controls { grid-template-columns: 1fr; }
+  .image-tools-actions { align-items: stretch; flex-direction: column; }
   .obsidian-variant-list { grid-template-columns: 1fr; }
   .obsidian-preview-actions { align-items: stretch; flex-direction: column; }
   .dashboard-metrics { grid-template-columns: 1fr 1fr; }

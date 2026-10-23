@@ -15,6 +15,7 @@ import {
 import { initObsidianPublishing } from './obsidian-publishing.js';
 import { init1688Publishing } from './1688-publishing.js';
 import { initKeywordRecords } from './keyword-records.js';
+import { initImageTools } from './image-tools.js';
 import { initLocalServiceConnection } from './local-service.js';
 
 const providerPresets = {
@@ -120,6 +121,7 @@ function setBusy(button, busy, busyText) {
 }
 
 const keywordRecordsController = initKeywordRecords({ requestJson });
+const imageToolsController = initImageTools({ requestJson });
 
 function switchModule(moduleName) {
   document.querySelectorAll('.module-link').forEach((button) => {
@@ -135,6 +137,7 @@ function switchModule(moduleName) {
   });
   if (moduleName === 'product-pool' || moduleName === 'dashboard') loadProductPool();
   if (moduleName === 'keyword-records') keywordRecordsController.load();
+  if (moduleName === 'image-tools') imageToolsController.load();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 

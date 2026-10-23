@@ -415,7 +415,7 @@ test('GET / serves the workbench page and client script', async () => {
     assert.match(html, /国际站自动上品/);
     const sidebar = html.match(/<nav class="module-nav">([\s\S]*?)<\/nav>/)?.[1] || '';
     assert.deepEqual([...sidebar.matchAll(/data-module="([^"]+)"/g)].map((match) => match[1]), [
-      'obsidian-publishing', 'keyword-records', '1688-publishing', 'alibaba-settings',
+      'obsidian-publishing', 'keyword-records', 'image-tools', '1688-publishing', 'alibaba-settings',
     ]);
     assert.match(sidebar, /data-module="obsidian-publishing"[^>]*aria-current="page"/);
     assert.match(html, /data-module="alibaba-settings"/);

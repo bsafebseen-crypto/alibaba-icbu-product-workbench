@@ -32,6 +32,12 @@
           </span>
           <span class="nav-label"><strong>关键词记录</strong><small>询盘词与屏蔽词</small></span>
         </button>
+        <button class="module-link" type="button" data-module="image-tools">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16v16H4zM4 16l5-5 4 4 3-3 4 4"/><circle cx="15.5" cy="8.5" r="1.5"/></svg>
+          </span>
+          <span class="nav-label"><strong>图片工具</strong><small>统一尺寸与顺序命名</small></span>
+        </button>
         <button class="module-link" type="button" data-module="1688-publishing">
           <span class="nav-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM7 10h4M7 14h7M17 9v6"/></svg>
@@ -420,6 +426,31 @@
               <footer><button class="button quiet" id="keyword-batch-cancel" type="button">取消</button><button class="button primary" type="submit">批量保存</button></footer>
             </form>
           </dialog>
+        </section>
+      </section>
+
+      <section class="module-page" id="module-image-tools" aria-labelledby="image-tools-title" aria-busy="false" hidden>
+        <header class="page-header compact-page-header">
+          <div>
+            <h1 id="image-tools-title">图片工具</h1>
+            <p>直接修改所选文件夹中的图片，统一为 JPG 800 × 800，并按 1.jpg、2.jpg… 顺序命名。</p>
+          </div>
+        </header>
+        <section class="console-panel image-tools-panel" aria-label="图片处理">
+          <div class="panel-band blue"><strong>选择图片文件夹</strong><span>仅在本机处理</span></div>
+          <div class="image-tools-controls">
+            <label for="image-tools-folder"><span>图片所在文件夹</span><input id="image-tools-folder" type="text" readonly placeholder="尚未选择文件夹"></label>
+            <button class="button quiet" id="image-tools-select" type="button" disabled>选择文件夹</button>
+          </div>
+          <div class="image-tools-actions">
+            <button class="button primary" id="image-tools-start" type="button" disabled>开始处理</button>
+            <button class="button quiet" id="image-tools-open" type="button" disabled>打开当前图片文件夹</button>
+          </div>
+        </section>
+        <section class="console-panel image-tools-results" aria-labelledby="image-tools-results-title">
+          <div class="panel-band teal"><strong id="image-tools-results-title">处理结果</strong></div>
+          <p class="obsidian-status" id="image-tools-status" role="status" aria-live="polite" aria-atomic="true">打开本页后读取图片工具状态。</p>
+          <ul id="image-tools-skipped" aria-label="跳过的文件" hidden></ul>
         </section>
       </section>
 
